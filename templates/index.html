@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YT Short Clipper</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="/static/assets/icon.png" type="image/png">
+</head>
+<body>
+
+<div class="app-container">
+  <!-- ═══ HEADER ═══ -->
+  <header class="app-header">
+    <div class="logo" onclick="showPage('home')">
+      <img src="/static/assets/icon.png" alt="YT Short Clipper" onerror="this.style.display='none'">
+      <h1>YT Short Clipper</h1>
+      <span class="version">v{{ version }}</span>
+    </div>
+    <nav class="header-nav">
+      <button onclick="showPage('home')" data-page="home" class="active">Home</button>
+      <button onclick="showPage('sessions')" data-page="sessions">Sessions</button>
+      <button onclick="showPage('settings')" data-page="settings">Settings</button>
+      <button onclick="showPage('status')" data-page="status">Status</button>
+    </nav>
+  </header>
+
+  <!-- ═══ HOME PAGE ═══ -->
+  <div id="page-home" class="page active">
+    <div class="home-grid">
+      <div class="home-left">
+        <!-- URL Input -->
+        <div class="card">
+          <div class="card-title">YouTube URL</div>
+          <div class="url-input-group">
+            <input type="url" id="url-input" placeholder="Paste YouTube link..."
+                   oninput="onUrlChange()">
+            <button class="btn btn-secondary btn-sm" onclick="pasteUrl()">📋 Paste</button>
+          </div>
+        </div>
+
+        <!-- Subtitle Language -->
+        <div class="card">
+          <div class="card-title">Subtitle Language</div>
+          <select id="subtitle-lang" disabled>
+            <option value="id">id - Indonesian</option>
+          </select>
+          <div id="subtitle-loading" style="display:none; font-size:11px; color:var(--text-muted); margin-top:6px;">
+            ⏳ Loading subtitles...
+          </div>
+        </div>
+
+        <!-- Clip Count -->
+        <div class="card">
+          <div class="card-title">Clip Count</div>
+          <div class="form-row">
+            <input type="number" id="clip-count" value="5" min="1" max="10" style="width:80px;">
+            <span style="font-size:12px; color:var(--text-muted);">(1-10)</span>
+          </div>
+        </div>
+
+        <!-- Cookies -->
+        <div class="card">
+          <div class="card-title">YouTube Cookies</div>
+          <div id="cookies-status" class="status-row">
+            <span class="status-dot red"></span>
+            <span>No cookies</span>
+          </div>
+          <div style="margin-top:8px">
+            <label for="cookies-upload" class="btn btn-secondary btn-sm btn-block" style="cursor:pointer">
+              📁 Upload Cookies File
+            </label>
+            <input type="file" id="cookies-upload" accept=".txt" style="display:none"
+                   onchange="uploadCookies(this)">
+          </div>
+        </div>
+      </div>
+
+      <div class="home-right">
+        <!-- Thumbnail Preview -->
+        <div class="thumbnail-preview" id="thumbnail-preview">
+          <div class="placeholder">
+            <div style="font-size:36px; margin-bottom:8px">🎬</div>
+            <div>Paste a YouTube URL to see preview</div>
+          </div>
+        </div>
+        <div id="video-title" style="font-size:13px; margin-top:8px; color:var(--text-secondary); min-height:18px;"></div>
+      </div>
+    </div>
+
+    <!-- Start Button -->
+    <div style="margin-top:16px">
+      <button class="btn btn-primary btn-block" id="start-btn" disabled onclick="startProcessing()"
+              style="height:48px; font-size:15px;">
+        🔍 Find Highlights
+      </button>
+    </div>
+
+    <!-- Lib Status -->
+    <div id="home-lib-status" style="text-align:center; margin-top:10px; font-size:11px; color:var(--text-muted);"></div>
+  </div>
+
+  <!-- ═══ PROCESSING PAGE ═══ -->
+  <div id="page-processing" class="page">
+    <h2 style="margin-bottom:16px">🎬 Processing</h2>
+
+    <div class="progress-steps" id="processing-steps">
+      <div class="progress-step" id="step-download">
+        <div class="step-icon">📥</div>
+        <div class="step-title">Downloading Video & Subtitles</div>
+      </div>
+      <div class="progress-step" id="step-highlights">
+        <div class="step-icon">🔍</div>
+        <div class="step-title">Finding Highlights with AI</div>
+      </div>
+    </div>
+
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="processing-progress"></div>
+    </div>
+
+    <div class="card">
+      <div id="processing-status" style="font-size:14px; font-weight:500; text-align:center;">
+        Initializing...
+      </div>
+    </div>
+
+    <div class="log-output" id="processing-log"></div>
+
+    <div class="btn-group" style="margin-top:16px">
+      <button class="btn btn-danger" id="cancel-btn" onclick="cancelJob()">❌ Cancel</button>
+      <button class="btn btn-secondary" id="back-home-btn" disabled onclick="showPage('home')">← Back</button>
+    </div>
+  </div>
+
+  <!-- ═══ HIGHLIGHT SELECTION PAGE ═══ -->
+  <div id="page-highlights" class="page">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+      <span class="back-link" onclick="showPage('home')">← Back</span>
+      <h2>Select Highlights</h2>
+    </div>
+    <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">
+      Select which highlights you want to process into short videos
+    </p>
+
+    <!-- Virality Legend -->
+    <div style="display:flex; gap:12px; font-size:11px; margin-bottom:12px;">
+      <span class="virality-badge virality-high">🔥 7-10 High</span>
+      <span class="virality-badge virality-mid">⚡ 5-6 Medium</span>
+      <span class="virality-badge virality-low">💫 1-4 Low</span>
+    </div>
+
+    <!-- Enhancement Options -->
+    <div class="card">
+      <div class="card-title">Enhancements</div>
+      <div class="toggle-row">
+        <span class="toggle-label">💬 Add Captions</span>
+        <label class="switch"><input type="checkbox" id="toggle-captions"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">🪝 Add Hook Text</span>
+        <label class="switch"><input type="checkbox" id="toggle-hook"><span class="slider"></span></label>
+      </div>
+    </div>
+
+    <!-- Highlight List -->
+    <div class="highlight-list" id="highlight-list"></div>
+
+    <!-- Action Buttons -->
+    <div style="margin-top:16px">
+      <div class="btn-group" style="margin-bottom:8px">
+        <button class="btn btn-secondary btn-sm" onclick="selectAllHighlights()">✓ Select All</button>
+        <button class="btn btn-secondary btn-sm" onclick="deselectAllHighlights()">✗ Deselect All</button>
+      </div>
+      <button class="btn btn-success btn-block" id="process-selected-btn"
+              onclick="processSelected()" style="height:48px; font-size:15px;">
+        ▶ Process Selected Clips
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ CLIPPING PAGE ═══ -->
+  <div id="page-clipping" class="page">
+    <h2 style="margin-bottom:16px">✂️ Clipping Videos</h2>
+
+    <div class="card">
+      <div class="card-title">Clipping Progress</div>
+      <div id="clip-current" style="font-size:15px; font-weight:600; margin-bottom:8px;">Preparing...</div>
+      <div class="progress-bar-container">
+        <div class="progress-bar-fill" id="clip-progress"></div>
+      </div>
+      <div id="clip-count-text" style="font-size:12px; color:var(--text-muted);">0 / 0 clips processed</div>
+    </div>
+
+    <div class="card">
+      <div id="clip-status" style="font-size:13px; text-align:center;">Initializing...</div>
+    </div>
+
+    <div class="log-output" id="clip-log"></div>
+
+    <div class="btn-group" style="margin-top:16px">
+      <button class="btn btn-danger" id="clip-cancel-btn" onclick="cancelJob()">❌ Cancel</button>
+      <button class="btn btn-secondary" id="clip-back-btn" disabled onclick="showPage('home')">← Back</button>
+      <button class="btn btn-success" id="clip-sessions-btn" disabled onclick="showPage('sessions')">📂 Browse Sessions</button>
+    </div>
+  </div>
+
+  <!-- ═══ SESSIONS/BROWSE PAGE ═══ -->
+  <div id="page-sessions" class="page">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h2>📋 Sessions</h2>
+      <button class="btn btn-secondary btn-sm" onclick="loadSessions()">🔄 Refresh</button>
+    </div>
+    <div id="sessions-list" class="session-list">
+      <div class="empty-state">
+        <div class="empty-icon">📂</div>
+        <div class="empty-text">No sessions yet. Start processing a video!</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SETTINGS PAGE ═══ -->
+  <div id="page-settings" class="page">
+    <div id="settings-main">
+      <h2 style="margin-bottom:16px">⚙️ Settings</h2>
+      <div class="settings-grid">
+        <div class="setting-card" onclick="openSettingsSubpage('ai-api')">
+          <div class="card-icon">🤖</div>
+          <div class="card-name">AI API</div>
+          <div class="card-desc">Configure AI providers</div>
+        </div>
+        <div class="setting-card" onclick="openSettingsSubpage('performance')">
+          <div class="card-icon">⚡</div>
+          <div class="card-name">Performance</div>
+          <div class="card-desc">GPU & encoding</div>
+        </div>
+        <div class="setting-card" onclick="openSettingsSubpage('output')">
+          <div class="card-icon">📁</div>
+          <div class="card-name">Output</div>
+          <div class="card-desc">Output directory & prompt</div>
+        </div>
+        <div class="setting-card" onclick="openSettingsSubpage('watermark')">
+          <div class="card-icon">💧</div>
+          <div class="card-name">Watermark</div>
+          <div class="card-desc">Video watermark</div>
+        </div>
+        <div class="setting-card" onclick="openSettingsSubpage('credit')">
+          <div class="card-icon">📝</div>
+          <div class="card-name">Credit</div>
+          <div class="card-desc">Channel name credit</div>
+        </div>
+        <div class="setting-card" onclick="openSettingsSubpage('about')">
+          <div class="card-icon">ℹ️</div>
+          <div class="card-name">About</div>
+          <div class="card-desc">App info & updates</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── AI API Settings ── -->
+    <div id="settings-ai-api" class="settings-subpage">
+      <span class="back-link" onclick="closeSettingsSubpage()">← Back to Settings</span>
+      <h3 style="margin-bottom:12px">🤖 AI API Configuration</h3>
+
+      <div class="card">
+        <div class="card-title">Provider Type</div>
+        <select id="provider-type" onchange="onProviderTypeChange()"></select>
+      </div>
+
+      <div class="module-cards" id="ai-modules">
+        <!-- Highlight Finder -->
+        <div class="module-card">
+          <div class="module-title">🔍 Highlight Finder</div>
+          <div class="form-group">
+            <label>Base URL</label>
+            <input type="text" id="hf-base-url" placeholder="https://api.openai.com/v1">
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="hf-api-key" placeholder="sk-...">
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <div class="form-row">
+              <select id="hf-model"><option>gpt-4.1</option></select>
+              <button class="btn btn-secondary btn-sm" onclick="loadModels('hf')" style="white-space:nowrap">Load</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Caption Maker -->
+        <div class="module-card">
+          <div class="module-title">📝 Caption Maker (Whisper)</div>
+          <div class="form-group">
+            <label>Base URL</label>
+            <input type="text" id="cm-base-url" placeholder="https://api.openai.com/v1">
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="cm-api-key" placeholder="sk-...">
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <select id="cm-model"><option>whisper-1</option></select>
+          </div>
+        </div>
+
+        <!-- Hook Maker -->
+        <div class="module-card">
+          <div class="module-title">🪝 Hook Maker (TTS)</div>
+          <div class="form-group">
+            <label>Base URL</label>
+            <input type="text" id="hm-base-url" placeholder="https://api.openai.com/v1">
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="hm-api-key" placeholder="sk-...">
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <select id="hm-model"><option>tts-1</option></select>
+          </div>
+        </div>
+
+        <!-- Title Generator -->
+        <div class="module-card">
+          <div class="module-title">📰 YouTube Title Generator</div>
+          <div class="form-group">
+            <label>Base URL</label>
+            <input type="text" id="tg-base-url" placeholder="https://api.openai.com/v1">
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <input type="password" id="tg-api-key" placeholder="sk-...">
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <div class="form-row">
+              <select id="tg-model"><option>gpt-4.1</option></select>
+              <button class="btn btn-secondary btn-sm" onclick="loadModels('tg')" style="white-space:nowrap">Load</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="btn-group" style="margin-top:12px">
+        <button class="btn btn-secondary" onclick="validateAllKeys()">✓ Validate Keys</button>
+        <button class="btn btn-primary" onclick="saveAiSettings()">💾 Save AI Settings</button>
+      </div>
+    </div>
+
+    <!-- ── Performance Settings ── -->
+    <div id="settings-performance" class="settings-subpage">
+      <span class="back-link" onclick="closeSettingsSubpage()">← Back to Settings</span>
+      <h3 style="margin-bottom:12px">⚡ Performance Settings</h3>
+
+      <div class="card">
+        <div class="card-title">Face Tracking Mode</div>
+        <select id="face-tracking-mode">
+          <option value="opencv">OpenCV (Fast) - Crop to largest face</option>
+          <option value="mediapipe">MediaPipe (Smart) - Active speaker tracking</option>
+        </select>
+      </div>
+
+      <div class="card" id="mediapipe-settings">
+        <div class="card-title">MediaPipe Settings</div>
+        <div class="form-group">
+          <label>Lip Activity Threshold</label>
+          <input type="number" id="mp-lip-threshold" value="0.15" step="0.01" min="0" max="1">
+        </div>
+        <div class="form-group">
+          <label>Switch Threshold</label>
+          <input type="number" id="mp-switch-threshold" value="0.3" step="0.01" min="0" max="1">
+        </div>
+        <div class="form-group">
+          <label>Min Shot Duration (frames)</label>
+          <input type="number" id="mp-min-shot" value="90" min="1">
+        </div>
+        <div class="form-group">
+          <label>Center Weight</label>
+          <input type="number" id="mp-center-weight" value="0.3" step="0.01" min="0" max="1">
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">GPU Acceleration</div>
+        <div class="toggle-row">
+          <span class="toggle-label">⚡ Enable GPU Acceleration</span>
+          <label class="switch"><input type="checkbox" id="gpu-enabled"><span class="slider"></span></label>
+        </div>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:6px;">
+          Auto-detects NVENC (NVIDIA), AMF (AMD), QSV (Intel), VideoToolbox (macOS)
+        </p>
+      </div>
+
+      <button class="btn btn-primary" onclick="savePerformanceSettings()">💾 Save Performance</button>
+    </div>
+
+    <!-- ── Output Settings ── -->
+    <div id="settings-output" class="settings-subpage">
+      <span class="back-link" onclick="closeSettingsSubpage()">← Back to Settings</span>
+      <h3 style="margin-bottom:12px">📁 Output Settings</h3>
+
+      <div class="card">
+        <div class="card-title">Output Directory</div>
+        <input type="text" id="output-dir" placeholder="/path/to/output">
+      </div>
+
+      <div class="card">
+        <div class="card-title">System Prompt</div>
+        <textarea id="system-prompt" rows="10" placeholder="System prompt for highlight detection..."></textarea>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Temperature</div>
+        <input type="number" id="temperature" value="1.0" step="0.1" min="0" max="2" style="width:100px;">
+      </div>
+
+      <button class="btn btn-primary" onclick="saveOutputSettings()">💾 Save Output</button>
+    </div>
+
+    <!-- ── Watermark Settings ── -->
+    <div id="settings-watermark" class="settings-subpage">
+      <span class="back-link" onclick="closeSettingsSubpage()">← Back to Settings</span>
+      <h3 style="margin-bottom:12px">💧 Watermark Settings</h3>
+
+      <div class="card">
+        <div class="toggle-row">
+          <span class="toggle-label">Enable Watermark</span>
+          <label class="switch"><input type="checkbox" id="wm-enabled"><span class="slider"></span></label>
+        </div>
+        <div class="form-group" style="margin-top:12px">
+          <label>Watermark Image</label>
+          <input type="file" id="wm-file" accept="image/*" onchange="uploadWatermark(this)">
+          <input type="text" id="wm-path" placeholder="Watermark image path" style="margin-top:6px;" readonly>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Position X (0-1)</label>
+            <input type="number" id="wm-x" value="0.85" step="0.05" min="0" max="1">
+          </div>
+          <div class="form-group">
+            <label>Position Y (0-1)</label>
+            <input type="number" id="wm-y" value="0.05" step="0.05" min="0" max="1">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Opacity (0-1)</label>
+            <input type="number" id="wm-opacity" value="0.8" step="0.1" min="0" max="1">
+          </div>
+          <div class="form-group">
+            <label>Scale (0-1)</label>
+            <input type="number" id="wm-scale" value="0.15" step="0.05" min="0" max="1">
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="saveWatermarkSettings()">💾 Save Watermark</button>
+    </div>
+
+    <!-- ── Credit Watermark Settings ── -->
+    <div id="settings-credit" class="settings-subpage">
+      <span class="back-link" onclick="closeSettingsSubpage()">← Back to Settings</span>
+      <h3 style="margin-bottom:12px">📝 Credit Watermark Settings</h3>
+
+      <div class="card">
+        <div class="toggle-row">
+          <span class="toggle-label">Enable Credit Watermark</span>
+          <label class="switch"><input type="checkbox" id="cw-enabled"><span class="slider"></span></label>
+        </div>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:6px;">
+          Automatically adds the channel name as a credit overlay on clips
+        </p>
+      </div>
+
+      <button class="btn btn-primary" onclick="saveCreditWatermarkSettings()">💾 Save Credit</button>
+    </div>
+
+    <!-- ── About ── -->
+    <div id="settings-about" class="settings-subpage">
+      <span class="back-link" onclick="closeSettingsSubpage()">← Back to Settings</span>
+      <h3 style="margin-bottom:12px">ℹ️ About</h3>
+
+      <div class="card">
+        <div style="text-align:center; padding:20px;">
+          <img src="/static/assets/icon.png" width="64" style="border-radius:12px; margin-bottom:12px;" onerror="this.style.display='none'">
+          <h2>YT Short Clipper</h2>
+          <p style="color:var(--text-muted); margin:8px 0">Version {{ version }} (Web Edition)</p>
+          <p style="font-size:13px; color:var(--text-secondary); max-width:400px; margin:0 auto;">
+            Automated YouTube to Short-Form Content Pipeline. Transform long-form videos into engaging short-form content powered by AI.
+          </p>
+          <div style="margin-top:16px; display:flex; gap:8px; justify-content:center;">
+            <a href="https://github.com/jipraks/yt-short-clipper" target="_blank" class="btn btn-secondary btn-sm">GitHub</a>
+            <a href="https://s.id/ytsdiscord" target="_blank" class="btn btn-secondary btn-sm">Discord</a>
+            <button class="btn btn-primary btn-sm" onclick="checkUpdate()">Check Updates</button>
+          </div>
+          <div id="update-status" style="margin-top:12px; font-size:12px; color:var(--text-muted);"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ STATUS PAGE ═══ -->
+  <div id="page-status" class="page">
+    <h2 style="margin-bottom:16px">📊 Library Status</h2>
+    <div class="lib-grid" id="lib-grid">
+      <div class="lib-item">
+        <div class="lib-icon">⏳</div>
+        <div class="lib-name">Loading...</div>
+      </div>
+    </div>
+    <button class="btn btn-secondary" style="margin-top:16px" onclick="loadLibStatus()">🔄 Refresh</button>
+  </div>
+
+  <!-- ═══ FOOTER ═══ -->
+  <footer class="app-footer">
+    YT Short Clipper v{{ version }} &mdash;
+    <a href="https://github.com/jipraks/yt-short-clipper" target="_blank">GitHub</a> &middot;
+    <a href="https://s.id/ytsdiscord" target="_blank">Discord</a>
+  </footer>
+</div>
+
+<!-- ═══ VIDEO PLAYER MODAL ═══ -->
+<div class="modal-overlay" id="video-modal" onclick="closeVideoModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="modal-title">Video</h3>
+      <button class="modal-close" onclick="closeVideoModal()">&times;</button>
+    </div>
+    <video id="modal-video" controls></video>
+  </div>
+</div>
+
+<!-- ═══ TOASTS ═══ -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ═══ SCRIPTS ═══ -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="/static/js/app.js"></script>
+
+</body>
+</html>

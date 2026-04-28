@@ -1,0 +1,10 @@
+# Web App Dependencies (includes base requirements)
+-r requirements.txt
+
+# Web Framework
+flask>=3.0.0
+flask-socketio>=5.3.0
+
+# Real-time support
+python-socketio>=5.10.0
+python-engineio>=4.8.0
