@@ -579,7 +579,7 @@ Transcript:
         else:
             self.log(f"  WARNING: FFmpeg not found - subtitle conversion disabled")
         
-        # Add cookies (required)
+        # Add cookies (optional - proceed without if not found)
         from utils.helpers import get_app_dir
         app_dir = get_app_dir()
         cookies_locations = [
@@ -594,11 +594,11 @@ Transcript:
                 cookies_path = loc
                 break
         
-        if not cookies_path:
-            raise Exception("cookies.txt not found!\n\nPlease upload cookies.txt file from home page.")
-        
-        ydl_opts['cookiefile'] = str(cookies_path)
-        self.log(f"  Using cookies from: {cookies_path}")
+        if cookies_path:
+            ydl_opts['cookiefile'] = str(cookies_path)
+            self.log(f"  Using cookies from: {cookies_path}")
+        else:
+            self.log(f"  No cookies found - proceeding without authentication")
         
         # Single download attempt (no browser cookies fallback)
         last_error = None
