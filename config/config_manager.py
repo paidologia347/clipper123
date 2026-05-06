@@ -3,6 +3,7 @@ Configuration manager for YT Short Clipper
 """
 
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -120,27 +121,34 @@ class ConfigManager:
         return config
     
     def _get_default_ai_providers(self):
-        """Get default AI provider configuration"""
+        """Get default AI provider configuration.
+        
+        Reads from environment variables if available:
+        - HIGHLIGHT_BASE_URL, HIGHLIGHT_API_KEY, HIGHLIGHT_MODEL
+        - CAPTION_BASE_URL, CAPTION_API_KEY, CAPTION_MODEL
+        - HOOK_BASE_URL, HOOK_API_KEY, HOOK_MODEL
+        - TITLE_BASE_URL, TITLE_API_KEY, TITLE_MODEL
+        """
         return {
             "highlight_finder": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "",
-                "model": "gpt-4.1"
+                "base_url": os.environ.get("HIGHLIGHT_BASE_URL", "https://api.openai.com/v1"),
+                "api_key": os.environ.get("HIGHLIGHT_API_KEY", ""),
+                "model": os.environ.get("HIGHLIGHT_MODEL", "gpt-4.1")
             },
             "caption_maker": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "",
-                "model": "whisper-1"
+                "base_url": os.environ.get("CAPTION_BASE_URL", "https://api.openai.com/v1"),
+                "api_key": os.environ.get("CAPTION_API_KEY", ""),
+                "model": os.environ.get("CAPTION_MODEL", "whisper-1")
             },
             "hook_maker": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "",
-                "model": "tts-1"
+                "base_url": os.environ.get("HOOK_BASE_URL", "https://api.openai.com/v1"),
+                "api_key": os.environ.get("HOOK_API_KEY", ""),
+                "model": os.environ.get("HOOK_MODEL", "tts-1")
             },
             "youtube_title_maker": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "",
-                "model": "gpt-4.1"
+                "base_url": os.environ.get("TITLE_BASE_URL", "https://api.openai.com/v1"),
+                "api_key": os.environ.get("TITLE_API_KEY", ""),
+                "model": os.environ.get("TITLE_MODEL", "gpt-4.1")
             }
         }
     
