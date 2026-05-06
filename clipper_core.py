@@ -1723,7 +1723,7 @@ Transcript:
         
         return valid[:num_clips]
     
-    def process_clip(self, video_path: str, highlight: dict, index: int, total_clips: int = 1, add_captions: bool = True, add_hook: bool = True):
+    def process_clip(self, video_path: str, highlight: dict, index: int, total_clips: int = 1, add_captions: bool = True, add_hook: bool = True, add_publish_pack: bool = True):
         """Process a single clip: cut, portrait, hook (optional), captions (optional)"""
         
         # Check cancel before starting
@@ -1973,9 +1973,172 @@ Transcript:
             "has_credit": self.credit_watermark_settings.get("enabled", False),
             "channel_name": self.channel_name,
         }
+
+        if add_publish_pack:
+            try:
+                self.log("  Generating publish pack...")
+                metadata["publish_pack"] = self.generate_publish_pack(highlight, str(final_file), clip_dir)
+                self.log("  ✓ Publish pack generated")
+            except Exception as e:
+                metadata["publish_pack"] = {"error": str(e)}
+                self.log(f"  Warning: publish pack failed: {e}")
         
         with open(clip_dir / "data.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
+        
+        return metadata
+    
+    def generate_publish_pack(self, highlight: dict, video_path: str, clip_dir: Path) -> dict:
+        """Generate title, hashtags, description, and a thumbnail image for a clip."""
+        pack = self._generate_publish_copy(highlight)
+        thumbnail_path = clip_dir / "thumbnail.jpg"
+        thumbnail_text = pack.get("thumbnail_text") or pack.get("title") or highlight.get("title", "Short Clip")
+        self.create_thumbnail_image(video_path, str(thumbnail_path), thumbnail_text)
+        pack["thumbnail_path"] = str(thumbnail_path)
+        return pack
+    
+    def _generate_publish_copy(self, highlight: dict) -> dict:
+        """Generate publish metadata through the configured title generator."""
+        fallback_title = highlight.get("title", "Short clip")
+        fallback = {
+            "title": fallback_title,
+            "description": highlight.get("description", highlight.get("hook_text", fallback_title)),
+            "hashtags": ["shorts", "viral", "youtube", "clip"],
+            "thumbnail_text": highlight.get("hook_text", fallback_title),
+            "thumbnail_prompt": f"Use a high-contrast frame with text: {highlight.get('hook_text', fallback_title)}",
+        }
+        
+        tg_config = (self.ai_providers or {}).get("youtube_title_maker", {})
+        api_key = (tg_config.get("api_key") or "").strip()
+        if not api_key:
+            return fallback
+        
+        client = OpenAI(
+            api_key=api_key,
+            base_url=tg_config.get("base_url", "https://api.openai.com/v1"),
+        )
+        model = tg_config.get("model", self.model)
+        prompt = f"""
+Create a publish package for one short-form video clip.
+
+Return only JSON with these keys:
+- title: catchy YouTube Shorts title, max 70 characters
+- description: short Indonesian description, max 180 characters
+- hashtags: 8 to 12 relevant hashtags without spaces
+- thumbnail_text: bold thumbnail headline, max 6 words
+- thumbnail_prompt: concise visual direction for thumbnail design
+
+Clip data:
+Title: {highlight.get('title', '')}
+Hook: {highlight.get('hook_text', '')}
+Description: {highlight.get('description', '')}
+Channel: {self.channel_name}
+"""
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a short-form video publishing strategist. Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.8,
+        )
+        content = response.choices[0].message.content or ""
+        parsed = self._parse_json_object(content)
+        if not parsed:
+            return fallback
+        
+        hashtags = parsed.get("hashtags") or fallback["hashtags"]
+        if isinstance(hashtags, str):
+            hashtags = [tag.strip() for tag in re.split(r"[\s,]+", hashtags) if tag.strip()]
+        
+        return {
+            "title": str(parsed.get("title") or fallback["title"])[:90],
+            "description": str(parsed.get("description") or fallback["description"])[:240],
+            "hashtags": [str(tag).strip().lstrip("#") for tag in hashtags if str(tag).strip()][:12],
+            "thumbnail_text": str(parsed.get("thumbnail_text") or fallback["thumbnail_text"])[:80],
+            "thumbnail_prompt": str(parsed.get("thumbnail_prompt") or fallback["thumbnail_prompt"])[:300],
+        }
+    
+    def _parse_json_object(self, text: str) -> dict:
+        """Parse a JSON object from a model response."""
+        try:
+            data = json.loads(text)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            pass
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            return {}
+        try:
+            data = json.loads(match.group(0))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    
+    def create_thumbnail_image(self, video_path: str, output_path: str, headline: str):
+        """Create a JPEG thumbnail from the finished vertical clip with text overlay."""
+        from PIL import Image, ImageDraw, ImageFont
+        
+        cap = cv2.VideoCapture(video_path)
+        frame = None
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total_frames > 30:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, min(30, total_frames - 1))
+        ok, frame = cap.read()
+        cap.release()
+        if not ok or frame is None:
+            raise Exception("Could not read clip frame for thumbnail")
+        
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(frame).resize((1080, 1920))
+        draw = ImageDraw.Draw(image, "RGBA")
+        
+        font_path = self._find_thumbnail_font()
+        title_font = ImageFont.truetype(font_path, 96) if font_path else ImageFont.load_default()
+        small_font = ImageFont.truetype(font_path, 42) if font_path else ImageFont.load_default()
+        
+        draw.rectangle([(0, 0), (1080, 1920)], fill=(0, 0, 0, 35))
+        draw.rectangle([(70, 1180), (1010, 1710)], fill=(0, 0, 0, 165))
+        
+        lines = self._wrap_thumbnail_text(headline.upper(), title_font, 880, draw)
+        y = 1240
+        for line in lines[:4]:
+            bbox = draw.textbbox((0, 0), line, font=title_font)
+            x = (1080 - (bbox[2] - bbox[0])) // 2
+            draw.text((x + 4, y + 4), line, font=title_font, fill=(0, 0, 0, 220))
+            draw.text((x, y), line, font=title_font, fill=(255, 238, 64, 255))
+            y += 112
+        
+        draw.text((88, 1650), "YT SHORT CLIPPER", font=small_font, fill=(255, 255, 255, 220))
+        image.convert("RGB").save(output_path, "JPEG", quality=92)
+    
+    def _find_thumbnail_font(self):
+        candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+            "C:/Windows/Fonts/arialbd.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+        ]
+        for path in candidates:
+            if Path(path).exists():
+                return path
+        return None
+    
+    def _wrap_thumbnail_text(self, text: str, font, max_width: int, draw) -> list:
+        words = text.split()
+        lines = []
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            bbox = draw.textbbox((0, 0), candidate, font=font)
+            if bbox[2] - bbox[0] <= max_width or not current:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines or [text[:18]]
     
     def convert_to_portrait(self, input_path: str, output_path: str):
         """Convert landscape to 9:16 portrait with speaker tracking (router method)"""
