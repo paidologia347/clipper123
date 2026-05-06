@@ -1,3 +1,14 @@
+---
+title: YT Short Clipper
+emoji: 🎬
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Web UI for clipping long YouTube videos into short-form clips.
+---
+
 # YT-Short-Clipper
 
 [![Discord](https://img.shields.io/badge/Join-Discord-5865F2?logo=discord&logoColor=white)](https://s.id/ytsdiscord)
@@ -234,6 +245,17 @@ Then open `http://localhost:5000` in your browser.
 | `PORT` | `5000` | Server port |
 | `SECRET_KEY` | auto | Flask secret key |
 | `FLASK_DEBUG` | `0` | Debug mode (`1` to enable) |
+
+### Hugging Face Spaces Deployment
+
+This repository is configured for Hugging Face Spaces with Docker. The Space should run the Flask web app from `web_app.py`, not the desktop GUI entry point in `app.py`.
+
+Deployment notes:
+
+- Hugging Face reads the Space metadata from the YAML block at the top of this `README.md`.
+- The included `Dockerfile` installs Python dependencies from `requirements_web.txt`, installs system FFmpeg, exposes port `7860`, and starts `python web_app.py`.
+- Store API keys and other private values as Hugging Face Space Variables or Secrets. Do not commit real API keys, cookies, or tokens to this repository.
+- Core processing requires FFmpeg, yt-dlp, an AI provider API key, and YouTube cookies for restricted videos. Long videos can be slow or fail on small CPU Spaces; test first with short videos.
 
 ---
 
