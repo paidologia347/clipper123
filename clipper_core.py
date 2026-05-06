@@ -533,8 +533,9 @@ Transcript:
                 self.log("  Download finished, processing...")
                 self.set_progress("Processing downloaded file...", 0.25)
         
-        # High-quality format selector
-        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo+bestaudio/best"
+        # High-quality format selector with permissive fallbacks for videos
+        # where YouTube exposes only limited account/region-specific formats.
+        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo[height<=2160]+bestaudio/best[height<=2160]/bestvideo*+bestaudio/best[ext=mp4]/best"
         
         # Base yt-dlp options
         ydl_opts = {
@@ -783,8 +784,9 @@ Transcript:
             }
         ]
         
-        # High-quality format selector (prioritize 720p+ with fallback)
-        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo+bestaudio/best"
+        # High-quality format selector with permissive fallbacks for videos
+        # where YouTube exposes only limited account/region-specific formats.
+        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo[height<=2160]+bestaudio/best[height<=2160]/bestvideo*+bestaudio/best[ext=mp4]/best"
         
         last_error = None
         for strategy in download_strategies:
