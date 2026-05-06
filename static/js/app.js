@@ -413,6 +413,7 @@ async function processSelected() {
 
   const addCaptions = document.getElementById('toggle-captions').checked;
   const addHook = document.getElementById('toggle-hook').checked;
+  const addPublishPack = document.getElementById('toggle-publish-pack').checked;
 
   showPage('clipping');
   resetClipUI();
@@ -427,6 +428,7 @@ async function processSelected() {
         selected: selected,
         add_captions: addCaptions,
         add_hook: addHook,
+        add_publish_pack: addPublishPack,
       }),
     });
     const data = await resp.json();
@@ -492,6 +494,7 @@ async function loadSessions() {
               <div class="clip-info">
                 <div class="clip-title">${clip.title}</div>
                 <div class="clip-meta">${clip.hook_text || ''} ${clip.duration ? '| ' + Math.round(clip.duration) + 's' : ''}</div>
+                ${renderPublishPack(clip)}
               </div>
               <div class="clip-actions">
                 <button class="btn btn-secondary btn-sm" onclick="playVideo('${clip.video_path.replace(/'/g, "\\'")}', '${clip.title.replace(/'/g, "\\'")}')">▶</button>
@@ -506,6 +509,41 @@ async function loadSessions() {
   } catch (e) {
     container.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">Failed to load sessions</div></div>';
   }
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderPublishPack(clip) {
+  const pack = clip.publish_pack || {};
+  if (!pack.title && !pack.thumbnail_path && !(pack.hashtags || []).length) return '';
+
+  const hashtags = (pack.hashtags || []).map(tag => {
+    const label = String(tag || '').startsWith('#') ? tag : `#${tag}`;
+    return `<span class="publish-tag">${escapeHtml(label)}</span>`;
+  }).join('');
+
+  const thumb = pack.thumbnail_path
+    ? `<img class="publish-thumb" src="/api/sessions/thumbnail?path=${encodeURIComponent(pack.thumbnail_path)}" alt="Thumbnail">`
+    : '';
+
+  return `
+    <div class="publish-pack">
+      ${thumb}
+      <div class="publish-copy">
+        <div class="publish-label">Publish Pack</div>
+        <div class="publish-title">${escapeHtml(pack.title || clip.title)}</div>
+        ${pack.description ? `<div class="publish-description">${escapeHtml(pack.description)}</div>` : ''}
+        ${hashtags ? `<div class="publish-tags">${hashtags}</div>` : ''}
+      </div>
+    </div>
+  `;
 }
 
 

@@ -523,6 +523,7 @@ def start_clipping():
     selected_indices = data.get("selected", [])
     add_captions = data.get("add_captions", False)
     add_hook = data.get("add_hook", False)
+    add_publish_pack = data.get("add_publish_pack", True)
 
     # Find session data
     session_data = None
@@ -547,7 +548,7 @@ def start_clipping():
 
     def run_clip():
         try:
-            _run_clipping(clip_job_id, session_data, selected_indices, add_captions, add_hook)
+            _run_clipping(clip_job_id, session_data, selected_indices, add_captions, add_hook, add_publish_pack)
         finally:
             processing_lock.release()
 
@@ -558,7 +559,7 @@ def start_clipping():
     return jsonify({"job_id": clip_job_id, "status": "started"})
 
 
-def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook):
+def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook, add_publish_pack):
     """Background: clip selected highlights"""
     from openai import OpenAI
     from clipper_core import AutoClipperCore
@@ -638,6 +639,7 @@ def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook
                 clip_info = core.process_clip(
                     video_path, highlight, i, total,
                     add_captions=add_captions, add_hook=add_hook,
+                    add_publish_pack=add_publish_pack,
                 )
                 if clip_info:
                     created_clips.append(clip_info)
@@ -730,6 +732,7 @@ def list_sessions():
                             "duration": clip_data.get("duration_seconds", 0),
                             "virality_score": clip_data.get("virality_score", 0),
                             "video_path": str(master_file),
+                            "publish_pack": clip_data.get("publish_pack", {}),
                         })
 
             if session_info["clips"]:
@@ -745,6 +748,15 @@ def serve_video():
     if not path or not Path(path).exists():
         return jsonify({"error": "File not found"}), 404
     return send_file(path, mimetype="video/mp4")
+
+
+@app.route("/api/sessions/thumbnail", methods=["GET"])
+def serve_thumbnail():
+    """Serve a generated thumbnail image"""
+    path = request.args.get("path", "")
+    if not path or not Path(path).exists():
+        return jsonify({"error": "File not found"}), 404
+    return send_file(path, mimetype="image/jpeg")
 
 
 @app.route("/api/sessions/download", methods=["GET"])
