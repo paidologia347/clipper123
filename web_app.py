@@ -54,6 +54,14 @@ processing_lock = threading.Lock()
 active_jobs = {}  # job_id -> job info
 
 
+def append_job_log(job_id, message):
+    job = active_jobs.setdefault(job_id, {"status": "running"})
+    logs = job.setdefault("logs", [])
+    logs.append(str(message))
+    if len(logs) > 200:
+        del logs[:-200]
+
+
 # ════════════════════════════════════════════════════════════════════
 #  ROUTES – Pages
 # ════════════════════════════════════════════════════════════════════
@@ -373,6 +381,13 @@ def start_processing():
     if not processing_lock.acquire(blocking=False):
         return jsonify({"error": "Another job is running", "busy": True}), 409
 
+    active_jobs[job_id] = {
+        "type": "find_highlights",
+        "url": url,
+        "status": "running",
+        "logs": [],
+    }
+
     def run_job():
         try:
             _run_find_highlights(job_id, url, num_clips, subtitle_lang)
@@ -380,14 +395,8 @@ def start_processing():
             processing_lock.release()
 
     t = threading.Thread(target=run_job, daemon=True)
+    active_jobs[job_id]["thread"] = t
     t.start()
-
-    active_jobs[job_id] = {
-        "type": "find_highlights",
-        "url": url,
-        "status": "running",
-        "thread": t,
-    }
     return jsonify({"job_id": job_id, "status": "started"})
 
 
@@ -415,6 +424,13 @@ def upload_source_video():
 
     title = request.form.get("title") or Path(f.filename).stem
 
+    active_jobs[job_id] = {
+        "type": "find_highlights_upload",
+        "video_path": str(upload_path),
+        "status": "running",
+        "logs": [],
+    }
+
     def run_job():
         try:
             _run_find_highlights_from_upload(job_id, str(upload_path), num_clips, title)
@@ -422,14 +438,8 @@ def upload_source_video():
             processing_lock.release()
 
     t = threading.Thread(target=run_job, daemon=True)
+    active_jobs[job_id]["thread"] = t
     t.start()
-
-    active_jobs[job_id] = {
-        "type": "find_highlights_upload",
-        "video_path": str(upload_path),
-        "status": "running",
-        "thread": t,
-    }
     return jsonify({"job_id": job_id, "status": "started", "video_path": str(upload_path)})
 
 
@@ -442,9 +452,11 @@ def _run_find_highlights(job_id, url, num_clips, subtitle_lang):
     ai_providers = cfg.get("ai_providers", {})
 
     def log_cb(msg):
+        append_job_log(job_id, msg)
         socketio.emit("log", {"job_id": job_id, "message": str(msg)})
 
     def progress_cb(step_text, progress=None):
+        append_job_log(job_id, step_text)
         socketio.emit("progress", {
             "job_id": job_id,
             "step": str(step_text),
@@ -561,9 +573,11 @@ def _run_find_highlights_from_upload(job_id, video_path, num_clips, title):
     ai_providers = cfg.get("ai_providers", {})
 
     def log_cb(msg):
+        append_job_log(job_id, msg)
         socketio.emit("log", {"job_id": job_id, "message": str(msg)})
 
     def progress_cb(step_text, progress=None):
+        append_job_log(job_id, step_text)
         socketio.emit("progress", {
             "job_id": job_id,
             "step": str(step_text),
@@ -687,6 +701,8 @@ def start_clipping():
     if not processing_lock.acquire(blocking=False):
         return jsonify({"error": "Another job is running", "busy": True}), 409
 
+    active_jobs[clip_job_id] = {"type": "clipping", "status": "running", "logs": []}
+
     def run_clip():
         try:
             _run_clipping(clip_job_id, session_data, selected_indices, add_captions, add_hook, add_publish_pack)
@@ -694,9 +710,9 @@ def start_clipping():
             processing_lock.release()
 
     t = threading.Thread(target=run_clip, daemon=True)
+    active_jobs[clip_job_id]["thread"] = t
     t.start()
 
-    active_jobs[clip_job_id] = {"type": "clipping", "status": "running", "thread": t}
     return jsonify({"job_id": clip_job_id, "status": "started"})
 
 
@@ -709,9 +725,11 @@ def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook
     ai_providers = cfg.get("ai_providers", {})
 
     def log_cb(msg):
+        append_job_log(job_id, msg)
         socketio.emit("log", {"job_id": job_id, "message": str(msg)})
 
     def progress_cb(step_text, progress=None):
+        append_job_log(job_id, step_text)
         socketio.emit("clip_progress", {
             "job_id": job_id,
             "step": str(step_text),
@@ -823,7 +841,23 @@ def get_job_status(job_id):
         "type": job.get("type"),
         "status": job.get("status"),
         "error": job.get("error"),
+        "logs": job.get("logs", [])[-50:],
     })
+
+
+@app.route("/api/jobs", methods=["GET"])
+def list_jobs():
+    """List in-memory jobs for debugging the current Space worker."""
+    return jsonify([
+        {
+            "job_id": job_id,
+            "type": job.get("type"),
+            "status": job.get("status"),
+            "error": job.get("error"),
+            "logs": job.get("logs", [])[-10:],
+        }
+        for job_id, job in active_jobs.items()
+    ])
 
 
 @app.route("/api/job/<job_id>/cancel", methods=["POST"])
