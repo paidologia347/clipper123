@@ -63,6 +63,33 @@ def append_job_log(job_id, message):
         del logs[:-200]
 
 
+def validate_caption_maker_for_whisper(ai_providers):
+    """Return a user-facing error when Caption Maker cannot transcribe audio."""
+    cm_config = (ai_providers or {}).get("caption_maker", {})
+    base_url = (cm_config.get("base_url") or "").strip().rstrip("/")
+    api_key = (cm_config.get("api_key") or "").strip()
+    model = (cm_config.get("model") or "").strip()
+
+    if not api_key:
+        return (
+            "Caption Maker API key is empty. Uploaded video processing needs a Whisper-compatible "
+            "Caption Maker provider because uploaded videos do not have YouTube subtitles."
+        )
+
+    if "puter.com/puterai" in base_url:
+        return (
+            "Caption Maker is set to Puter AI, but Puter AI does not support Whisper audio "
+            "transcription at /audio/transcriptions. Change Caption Maker to OpenAI "
+            "https://api.openai.com/v1 with model whisper-1, or another provider that supports "
+            "OpenAI-compatible audio transcription."
+        )
+
+    if model and model != "whisper-1" and "openai.com" in base_url:
+        return "OpenAI Caption Maker should use model whisper-1 for audio transcription."
+
+    return None
+
+
 # ════════════════════════════════════════════════════════════════════
 #  ROUTES – Pages
 # ════════════════════════════════════════════════════════════════════
@@ -423,6 +450,10 @@ def upload_source_video():
     if content_length and content_length > app.config["MAX_CONTENT_LENGTH"]:
         return jsonify({"error": f"Video is too large for this Space upload limit ({max_mb} MB). Use a shorter/compressed clip or upload through external storage."}), 413
 
+    caption_error = validate_caption_maker_for_whisper(config_manager.config.get("ai_providers", {}))
+    if caption_error:
+        return jsonify({"error": caption_error, "needs_caption_maker": True}), 400
+
     num_clips = int(request.form.get("num_clips", 5))
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(f.filename).name)
     upload_dir = OUTPUT_DIR / "_uploads"
@@ -599,6 +630,10 @@ def _run_find_highlights_from_upload(job_id, video_path, num_clips, title):
 
     try:
         progress_cb("Preparing uploaded video...", 0.05)
+
+        caption_error = validate_caption_maker_for_whisper(ai_providers)
+        if caption_error:
+            raise Exception(caption_error)
 
         hf_config = ai_providers.get("highlight_finder", {})
         client = OpenAI(
