@@ -814,7 +814,7 @@ async function validateAllKeys() {
       const resp = await fetch('/api/validate_key', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({base_url: baseUrl, api_key: apiKey}),
+        body: JSON.stringify({base_url: baseUrl, api_key: apiKey, task: mod.prefix === 'cm' ? 'caption_maker' : ''}),
       });
       const data = await resp.json();
       showToast(`${mod.name}: ${data.status === 'ok' ? 'Valid' : data.message}`, data.status === 'ok' ? 'success' : 'error');

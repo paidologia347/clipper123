@@ -1416,6 +1416,13 @@ Transcript:
                 with open(audio_path, "rb") as f:
                     files = {"file": (os.path.basename(audio_path), f, "audio/mpeg")}
                     resp = _requests.post(url, headers=headers, data=form_data, files=files, timeout=600)
+                    if resp.status_code == 404 and "puter.com/puterai" in base_url:
+                        raise Exception(
+                            "Caption Maker endpoint does not support Whisper transcription. "
+                            "Puter AI returned 404 for /audio/transcriptions. "
+                            "Set Caption Maker to OpenAI https://api.openai.com/v1 with model whisper-1, "
+                            "or use another OpenAI-compatible provider that supports audio transcription."
+                        )
                     resp.raise_for_status()
                     response_data = resp.json()
             except Exception as e:

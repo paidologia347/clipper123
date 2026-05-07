@@ -184,9 +184,16 @@ def validate_api_key():
     data = request.json
     base_url = (data or {}).get("base_url", "")
     api_key = (data or {}).get("api_key", "")
+    task = (data or {}).get("task", "")
 
     if not base_url or not api_key:
         return jsonify({"status": "error", "message": "Missing base_url or api_key"})
+
+    if task == "caption_maker" and "puter.com/puterai" in base_url:
+        return jsonify({
+            "status": "error",
+            "message": "Puter AI does not support Whisper audio transcription. Use OpenAI /v1 with whisper-1 or another provider with /audio/transcriptions support."
+        })
 
     import requests as req
     url = base_url.rstrip("/")
