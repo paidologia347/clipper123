@@ -1406,71 +1406,118 @@ Transcript:
         if self.subtitle_language and self.subtitle_language != "none":
             form_data["language"] = self.subtitle_language
         
-        # Run API call in a thread so we can log heartbeat while waiting
+        # Run API calls in a thread so we can log heartbeat while waiting.
+        # Whisper providers can rate-limit longer audio jobs, so retry transient failures.
         response_data = None
-        api_error = None
+        max_attempts = 4
+        retryable_status_codes = {429, 500, 502, 503, 504}
+        retry_delays = [30, 60, 120]
+        last_error = None
         
-        def _call_api():
-            nonlocal response_data, api_error
-            try:
-                with open(audio_path, "rb") as f:
-                    files = {"file": (os.path.basename(audio_path), f, "audio/mpeg")}
-                    resp = _requests.post(url, headers=headers, data=form_data, files=files, timeout=600)
-                    if resp.status_code == 404 and "puter.com/puterai" in base_url:
+        for attempt in range(1, max_attempts + 1):
+            response_data = None
+            api_error = None
+            api_status_code = None
+            retry_after = None
+            
+            if attempt > 1:
+                self.log(f"    Retrying Whisper API call (attempt {attempt}/{max_attempts})...")
+            
+            def _call_api():
+                nonlocal response_data, api_error, api_status_code, retry_after
+                try:
+                    with open(audio_path, "rb") as f:
+                        files = {"file": (os.path.basename(audio_path), f, "audio/mpeg")}
+                        resp = _requests.post(url, headers=headers, data=form_data, files=files, timeout=600)
+                        api_status_code = resp.status_code
+                        retry_after = resp.headers.get("Retry-After")
+                        if resp.status_code == 404 and "puter.com/puterai" in base_url:
+                            raise Exception(
+                                "Caption Maker endpoint does not support Whisper transcription. "
+                                "Puter AI returned 404 for /audio/transcriptions. "
+                                "Set Caption Maker to OpenAI https://api.openai.com/v1 with model whisper-1, "
+                                "or use another OpenAI-compatible provider that supports audio transcription."
+                            )
+                        resp.raise_for_status()
+                        response_data = resp.json()
+                except Exception as e:
+                    api_error = e
+            
+            api_thread = threading.Thread(target=_call_api, daemon=True)
+            start_time = _time.time()
+            api_thread.start()
+            
+            TIMEOUT_SECONDS = 300  # 5 minutes max per chunk
+            while api_thread.is_alive():
+                api_thread.join(timeout=15)
+                if api_thread.is_alive():
+                    elapsed = _time.time() - start_time
+                    
+                    if self.is_cancelled():
+                        self.log("    Cancelled by user during Whisper API call")
+                        return []
+                    
+                    if elapsed > TIMEOUT_SECONDS:
+                        self.log(f"    Whisper API timed out after {TIMEOUT_SECONDS}s")
                         raise Exception(
-                            "Caption Maker endpoint does not support Whisper transcription. "
-                            "Puter AI returned 404 for /audio/transcriptions. "
-                            "Set Caption Maker to OpenAI https://api.openai.com/v1 with model whisper-1, "
-                            "or use another OpenAI-compatible provider that supports audio transcription."
+                            f"Whisper API timed out after {TIMEOUT_SECONDS}s.\n\n"
+                            "Possible causes:\n"
+                            "1. Your AI API provider may not support the Whisper audio endpoint\n"
+                            "2. The server may be overloaded or unreachable\n"
+                            "3. Network connection issue\n\n"
+                            "Try:\n"
+                            "- Check if your Caption Maker API supports audio transcription\n"
+                            "- Try again later\n"
+                            "- Use a different API provider for Caption Maker"
                         )
-                    resp.raise_for_status()
-                    response_data = resp.json()
-            except Exception as e:
-                api_error = e
-        
-        api_thread = threading.Thread(target=_call_api, daemon=True)
-        start_time = _time.time()
-        api_thread.start()
-        
-        # Heartbeat: log every 15s so user knows it's still working
-        TIMEOUT_SECONDS = 300  # 5 minutes max per chunk
-        while api_thread.is_alive():
-            api_thread.join(timeout=15)
-            if api_thread.is_alive():
-                elapsed = _time.time() - start_time
-                
-                # Check cancellation
-                if self.is_cancelled():
-                    self.log(f"    ⚠️ Cancelled by user during Whisper API call")
-                    return []
-                
-                if elapsed > TIMEOUT_SECONDS:
-                    self.log(f"    ⏱️ Whisper API timed out after {TIMEOUT_SECONDS}s")
-                    raise Exception(
-                        f"Whisper API timed out after {TIMEOUT_SECONDS}s.\n\n"
-                        "Possible causes:\n"
-                        "1. Your AI API provider may not support the Whisper audio endpoint\n"
-                        "2. The server may be overloaded or unreachable\n"
-                        "3. Network connection issue\n\n"
-                        "Try:\n"
-                        "- Check if your Caption Maker API supports audio transcription\n"
-                        "- Try again later\n"
-                        "- Use a different API provider for Caption Maker"
+                    self.log(f"    Waiting for Whisper API response... ({elapsed:.0f}s elapsed)")
+                    self.set_progress(f"Transcribing with AI... waiting for response ({elapsed:.0f}s)", 0.35)
+            
+            elapsed = _time.time() - start_time
+            
+            if not api_error and response_data is not None:
+                self.log(f"    Whisper API responded in {elapsed:.1f}s")
+                break
+            
+            if api_error:
+                last_error = api_error
+                is_retryable = api_status_code in retryable_status_codes
+                if is_retryable and attempt < max_attempts:
+                    delay = retry_delays[min(attempt - 1, len(retry_delays) - 1)]
+                    if retry_after:
+                        try:
+                            delay = max(delay, int(float(retry_after)))
+                        except ValueError:
+                            pass
+                    self.log(
+                        f"    Whisper API temporary error {api_status_code} after {elapsed:.1f}s; "
+                        f"retrying in {delay}s..."
                     )
-                self.log(f"    ⏳ Waiting for Whisper API response... ({elapsed:.0f}s elapsed)")
-                self.set_progress(f"Transcribing with AI... waiting for response ({elapsed:.0f}s)", 0.35)
-        
-        elapsed = _time.time() - start_time
-        
-        if api_error:
-            self.log(f"  ❌ Whisper API error after {elapsed:.1f}s: {api_error}")
-            raise Exception(f"Whisper transcription failed:\n{str(api_error)}")
+                    for _ in range(delay):
+                        if self.is_cancelled():
+                            self.log("    Cancelled by user before Whisper retry")
+                            return []
+                        _time.sleep(1)
+                    continue
+                
+                self.log(f"  Whisper API error after {elapsed:.1f}s: {api_error}")
+                raise Exception(f"Whisper transcription failed:\n{str(api_error)}")
+            
+            last_error = Exception("Whisper API returned no response. The endpoint may not support audio transcription.")
+            if attempt < max_attempts:
+                delay = retry_delays[min(attempt - 1, len(retry_delays) - 1)]
+                self.log(f"    Whisper API returned no response after {elapsed:.1f}s; retrying in {delay}s...")
+                for _ in range(delay):
+                    if self.is_cancelled():
+                        self.log("    Cancelled by user before Whisper retry")
+                        return []
+                    _time.sleep(1)
+                continue
         
         if response_data is None:
-            self.log(f"  ❌ Whisper API returned no response after {elapsed:.1f}s")
-            raise Exception("Whisper API returned no response. The endpoint may not support audio transcription.")
+            self.log("  Whisper API returned no response after retries")
+            raise Exception(f"Whisper transcription failed:\n{str(last_error)}")
         
-        self.log(f"    ✓ Whisper API responded in {elapsed:.1f}s")
         
         segments = []
         if "segments" in response_data and response_data["segments"]:
