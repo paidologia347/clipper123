@@ -105,6 +105,7 @@ function showPage(name) {
 
 // ── Home Page ──────────────────────────────────────
 let urlDebounce = null;
+let selectedSourceVideo = null;
 
 function onUrlChange() {
   clearTimeout(urlDebounce);
@@ -114,7 +115,7 @@ function onUrlChange() {
     document.getElementById('thumbnail-preview').innerHTML =
       '<div class="placeholder"><div style="font-size:36px; margin-bottom:8px">🎬</div><div>Paste a YouTube URL to see preview</div></div>';
     document.getElementById('video-title').textContent = '';
-    document.getElementById('start-btn').disabled = true;
+    document.getElementById('start-btn').disabled = !selectedSourceVideo;
     return;
   }
 
@@ -141,6 +142,26 @@ function extractVideoId(url) {
     if (m) return m[1];
   }
   return null;
+}
+
+function onSourceVideoSelected(input) {
+  const file = input.files[0];
+  selectedSourceVideo = file || null;
+  const nameEl = document.getElementById('source-video-name');
+
+  if (!file) {
+    nameEl.textContent = '';
+    if (!document.getElementById('url-input').value.trim()) {
+      document.getElementById('start-btn').disabled = true;
+    }
+    return;
+  }
+
+  nameEl.textContent = `${file.name} (${Math.round(file.size / 1024 / 1024)} MB)`;
+  document.getElementById('start-btn').disabled = false;
+  document.getElementById('thumbnail-preview').innerHTML =
+    '<div class="placeholder"><div style="font-size:36px; margin-bottom:8px">🎞</div><div>Uploaded video selected</div></div>';
+  document.getElementById('video-title').textContent = file.name;
 }
 
 async function fetchVideoInfo(url) {
@@ -230,7 +251,7 @@ async function checkCookiesStatus() {
 // ── Processing ─────────────────────────────────────
 async function startProcessing() {
   const url = document.getElementById('url-input').value.trim();
-  if (!url) return;
+  if (!url && !selectedSourceVideo) return;
 
   const numClips = parseInt(document.getElementById('clip-count').value) || 5;
   const subtitleLang = document.getElementById('subtitle-lang').value;
@@ -239,11 +260,20 @@ async function startProcessing() {
   resetProcessingUI();
 
   try {
-    const resp = await fetch('/api/process/start', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url, num_clips: numClips, subtitle_lang: subtitleLang}),
-    });
+    let resp;
+    if (selectedSourceVideo) {
+      const formData = new FormData();
+      formData.append('file', selectedSourceVideo);
+      formData.append('num_clips', String(numClips));
+      formData.append('title', selectedSourceVideo.name.replace(/\.[^.]+$/, ''));
+      resp = await fetch('/api/source/upload', {method: 'POST', body: formData});
+    } else {
+      resp = await fetch('/api/process/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url, num_clips: numClips, subtitle_lang: subtitleLang}),
+      });
+    }
     const data = await resp.json();
 
     if (data.error) {

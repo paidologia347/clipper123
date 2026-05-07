@@ -391,6 +391,48 @@ def start_processing():
     return jsonify({"job_id": job_id, "status": "started"})
 
 
+@app.route("/api/source/upload", methods=["POST"])
+def upload_source_video():
+    """Upload a local source video and start highlight detection via AI transcription."""
+    if "file" not in request.files:
+        return jsonify({"error": "No video file provided"}), 400
+
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "No filename provided"}), 400
+
+    num_clips = int(request.form.get("num_clips", 5))
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(f.filename).name)
+    upload_dir = OUTPUT_DIR / "_uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    upload_path = upload_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
+    f.save(str(upload_path))
+
+    job_id = str(uuid.uuid4())[:8]
+
+    if not processing_lock.acquire(blocking=False):
+        return jsonify({"error": "Another job is running", "busy": True}), 409
+
+    title = request.form.get("title") or Path(f.filename).stem
+
+    def run_job():
+        try:
+            _run_find_highlights_from_upload(job_id, str(upload_path), num_clips, title)
+        finally:
+            processing_lock.release()
+
+    t = threading.Thread(target=run_job, daemon=True)
+    t.start()
+
+    active_jobs[job_id] = {
+        "type": "find_highlights_upload",
+        "video_path": str(upload_path),
+        "status": "running",
+        "thread": t,
+    }
+    return jsonify({"job_id": job_id, "status": "started", "video_path": str(upload_path)})
+
+
 def _run_find_highlights(job_id, url, num_clips, subtitle_lang):
     """Background: download video + find highlights"""
     from openai import OpenAI
@@ -501,6 +543,105 @@ def _run_find_highlights(job_id, url, num_clips, subtitle_lang):
             "highlights": highlights,
             "video_info": video_info or {},
             "channel_name": channel_name,
+        })
+
+    except Exception as e:
+        active_jobs[job_id]["status"] = "error"
+        active_jobs[job_id]["error"] = str(e)
+        socketio.emit("job_error", {"job_id": job_id, "error": str(e)})
+        log_cb(f"Error: {e}")
+
+
+def _run_find_highlights_from_upload(job_id, video_path, num_clips, title):
+    """Background: transcribe an uploaded video + find highlights."""
+    from openai import OpenAI
+    from clipper_core import AutoClipperCore
+
+    cfg = config_manager.config
+    ai_providers = cfg.get("ai_providers", {})
+
+    def log_cb(msg):
+        socketio.emit("log", {"job_id": job_id, "message": str(msg)})
+
+    def progress_cb(step_text, progress=None):
+        socketio.emit("progress", {
+            "job_id": job_id,
+            "step": str(step_text),
+            "progress": float(progress) if progress is not None else 0,
+        })
+
+    try:
+        progress_cb("Preparing uploaded video...", 0.05)
+
+        hf_config = ai_providers.get("highlight_finder", {})
+        client = OpenAI(
+            api_key=hf_config.get("api_key", ""),
+            base_url=hf_config.get("base_url", "https://api.openai.com/v1"),
+        ) if hf_config.get("api_key") else None
+
+        output_dir = cfg.get("output_dir", str(OUTPUT_DIR))
+        core = AutoClipperCore(
+            client=client,
+            ffmpeg_path=get_ffmpeg_path(),
+            ytdlp_path=get_ytdlp_path(),
+            output_dir=output_dir,
+            model=hf_config.get("model", "gpt-4.1"),
+            tts_model=cfg.get("tts_model", "tts-1"),
+            temperature=cfg.get("temperature", 1.0),
+            system_prompt=cfg.get("system_prompt"),
+            watermark_settings=cfg.get("watermark", {"enabled": False}),
+            credit_watermark_settings=cfg.get("credit_watermark", {"enabled": False}),
+            face_tracking_mode=cfg.get("face_tracking_mode", "opencv"),
+            mediapipe_settings=cfg.get("mediapipe_settings"),
+            ai_providers=ai_providers,
+            subtitle_language="id",
+            log_callback=log_cb,
+            progress_callback=progress_cb,
+        )
+
+        gpu_cfg = cfg.get("gpu_acceleration", {})
+        if gpu_cfg.get("enabled"):
+            core.enable_gpu_acceleration(True)
+
+        video_info = {
+            "title": title,
+            "description": "Uploaded source video",
+            "channel": "Uploaded video",
+        }
+        core.channel_name = video_info["channel"]
+
+        progress_cb("Transcribing uploaded video...", 0.2)
+        result = core.find_highlights_with_transcription(video_path, video_info, num_clips)
+        if not result or not result.get("highlights"):
+            raise Exception("No valid highlights found from uploaded video")
+
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_data = {
+            "session_id": session_id,
+            "video_path": str(video_path),
+            "video_info": video_info,
+            "highlights": result["highlights"],
+            "session_dir": result.get("session_dir", ""),
+            "channel_name": video_info["channel"],
+            "use_whisper": True,
+            "source_type": "upload",
+        }
+
+        session_file = Path(output_dir) / f"_session_{session_id}.json"
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(session_file, "w") as f:
+            json.dump(session_data, f, indent=2, default=str)
+
+        active_jobs[job_id]["status"] = "highlights_ready"
+        active_jobs[job_id]["session_data"] = session_data
+
+        progress_cb("Highlights found!", 1.0)
+        socketio.emit("highlights_ready", {
+            "job_id": job_id,
+            "session_id": session_id,
+            "highlights": result["highlights"],
+            "video_info": video_info,
+            "channel_name": video_info["channel"],
         })
 
     except Exception as e:
