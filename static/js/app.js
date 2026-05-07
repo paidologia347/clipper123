@@ -284,11 +284,18 @@ async function startProcessing() {
         body: JSON.stringify({url, num_clips: numClips, subtitle_lang: subtitleLang}),
       });
     }
-    const data = await resp.json();
+    let data = {};
+    const rawText = await resp.text();
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (parseError) {
+      data = {error: rawText || `HTTP ${resp.status}`};
+    }
 
-    if (data.error) {
-      if (selectedSourceVideo) setSourceUploadStatus('error', `Upload failed: ${data.error}`);
-      showToast(data.error, 'error');
+    if (!resp.ok || data.error) {
+      const errorMessage = data.error || `HTTP ${resp.status}`;
+      if (selectedSourceVideo) setSourceUploadStatus('error', `Upload failed: ${errorMessage}`);
+      showToast(errorMessage, 'error');
       showPage('home');
       return;
     }
@@ -298,7 +305,8 @@ async function startProcessing() {
       setSourceUploadStatus('success', `Upload successful. Job ${data.job_id} is processing.`);
     }
   } catch (e) {
-    if (selectedSourceVideo) setSourceUploadStatus('error', 'Upload failed. Check file size and connection.');
+    const message = e && e.message ? e.message : 'Network error';
+    if (selectedSourceVideo) setSourceUploadStatus('error', `Upload failed: ${message}`);
     showToast('Failed to start processing', 'error');
     showPage('home');
   }

@@ -46,6 +46,7 @@ app = Flask(
     template_folder="templates",
 )
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "yt-short-clipper-web-secret")
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_UPLOAD_MB", "500")) * 1024 * 1024
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # ── Global State ─────────────────────────────────────────────────────
@@ -409,6 +410,11 @@ def upload_source_video():
     f = request.files["file"]
     if not f.filename:
         return jsonify({"error": "No filename provided"}), 400
+
+    max_mb = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
+    content_length = request.content_length or 0
+    if content_length and content_length > app.config["MAX_CONTENT_LENGTH"]:
+        return jsonify({"error": f"Video is too large for this Space upload limit ({max_mb} MB). Use a shorter/compressed clip or upload through external storage."}), 413
 
     num_clips = int(request.form.get("num_clips", 5))
     safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(f.filename).name)
