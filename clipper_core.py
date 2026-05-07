@@ -103,27 +103,30 @@ class AutoClipperCore:
         if self.ai_providers:
             # Highlight Finder client
             hf_config = self.ai_providers.get("highlight_finder", {})
+            hf_api_key = (hf_config.get("api_key") or "").strip()
             self.highlight_client = OpenAI(
-                api_key=hf_config.get("api_key", ""),
+                api_key=hf_api_key,
                 base_url=hf_config.get("base_url", "https://api.openai.com/v1")
-            )
+            ) if hf_api_key else None
             self.model = hf_config.get("model", model)
             
             # Caption Maker client (Whisper) — use longer timeout for large audio uploads
             cm_config = self.ai_providers.get("caption_maker", {})
+            cm_api_key = (cm_config.get("api_key") or "").strip()
             self.caption_client = OpenAI(
-                api_key=cm_config.get("api_key", ""),
+                api_key=cm_api_key,
                 base_url=cm_config.get("base_url", "https://api.openai.com/v1"),
                 timeout=600.0  # 10 minutes for large audio files
-            )
+            ) if cm_api_key else None
             self.whisper_model = cm_config.get("model", "whisper-1")
             
             # Hook Maker client (TTS)
             hm_config = self.ai_providers.get("hook_maker", {})
+            hm_api_key = (hm_config.get("api_key") or "").strip()
             self.tts_client = OpenAI(
-                api_key=hm_config.get("api_key", ""),
+                api_key=hm_api_key,
                 base_url=hm_config.get("base_url", "https://api.openai.com/v1")
-            )
+            ) if hm_api_key else None
             self.tts_model = hm_config.get("model", tts_model)
         else:
             # Fallback to single client (backward compatibility)
@@ -1381,6 +1384,9 @@ Transcript:
         """
         import time as _time
         import requests as _requests
+        
+        if not self.caption_client:
+            raise Exception("Caption Maker API key is missing. Configure Caption Maker in AI API Settings before processing uploaded videos.")
         
         file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
         base_url = str(self.caption_client.base_url).rstrip("/")
