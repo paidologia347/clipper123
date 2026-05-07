@@ -79,6 +79,35 @@ body {
   border-radius: 4px;
 }
 
+.upload-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.upload-status .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.upload-status.ready .status-dot { background: var(--accent); }
+.upload-status.uploading .status-dot { background: var(--orange); }
+.upload-status.success .status-dot { background: var(--green); }
+.upload-status.error .status-dot { background: var(--red); }
+.upload-status.success { border-color: rgba(39, 174, 96, 0.45); }
+.upload-status.error { border-color: rgba(192, 57, 43, 0.55); color: #f0b8b2; }
+
 .header-nav {
   display: flex;
   gap: 8px;

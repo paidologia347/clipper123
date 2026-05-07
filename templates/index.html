@@ -71,6 +71,10 @@
           <input type="file" id="source-video-upload" accept="video/mp4,video/quicktime,video/webm,video/*" style="display:none"
                  onchange="onSourceVideoSelected(this)">
           <div id="source-video-name" style="font-size:11px; color:var(--text-secondary); margin-top:8px;"></div>
+          <div id="source-upload-status" class="upload-status idle">
+            <span class="status-dot"></span>
+            <span>Select a video to upload</span>
+          </div>
         </div>
 
         <!-- Cookies -->

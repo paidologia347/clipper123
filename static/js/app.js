@@ -151,6 +151,7 @@ function onSourceVideoSelected(input) {
 
   if (!file) {
     nameEl.textContent = '';
+    setSourceUploadStatus('idle', 'Select a video to upload');
     if (!document.getElementById('url-input').value.trim()) {
       document.getElementById('start-btn').disabled = true;
     }
@@ -158,10 +159,18 @@ function onSourceVideoSelected(input) {
   }
 
   nameEl.textContent = `${file.name} (${Math.round(file.size / 1024 / 1024)} MB)`;
+  setSourceUploadStatus('ready', 'Ready to upload when you click Find Highlights');
   document.getElementById('start-btn').disabled = false;
   document.getElementById('thumbnail-preview').innerHTML =
     '<div class="placeholder"><div style="font-size:36px; margin-bottom:8px">🎞</div><div>Uploaded video selected</div></div>';
   document.getElementById('video-title').textContent = file.name;
+}
+
+function setSourceUploadStatus(state, message) {
+  const el = document.getElementById('source-upload-status');
+  if (!el) return;
+  el.className = `upload-status ${state}`;
+  el.innerHTML = `<span class="status-dot"></span><span>${escapeHtml(message)}</span>`;
 }
 
 async function fetchVideoInfo(url) {
@@ -262,6 +271,7 @@ async function startProcessing() {
   try {
     let resp;
     if (selectedSourceVideo) {
+      setSourceUploadStatus('uploading', 'Uploading source video...');
       const formData = new FormData();
       formData.append('file', selectedSourceVideo);
       formData.append('num_clips', String(numClips));
@@ -277,13 +287,18 @@ async function startProcessing() {
     const data = await resp.json();
 
     if (data.error) {
+      if (selectedSourceVideo) setSourceUploadStatus('error', `Upload failed: ${data.error}`);
       showToast(data.error, 'error');
       showPage('home');
       return;
     }
 
     currentJobId = data.job_id;
+    if (selectedSourceVideo) {
+      setSourceUploadStatus('success', `Upload successful. Job ${data.job_id} is processing.`);
+    }
   } catch (e) {
+    if (selectedSourceVideo) setSourceUploadStatus('error', 'Upload failed. Check file size and connection.');
     showToast('Failed to start processing', 'error');
     showPage('home');
   }
