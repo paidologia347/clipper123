@@ -6,7 +6,7 @@ colorTo: indigo
 sdk: docker
 app_port: 7860
 pinned: false
-short_description: Web UI for clipping long YouTube videos into short-form clips.
+short_description: AI video clipper for social shorts.
 ---
 
 # YT-Short-Clipper
