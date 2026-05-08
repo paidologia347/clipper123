@@ -599,6 +599,18 @@ label {
   margin-top: 4px;
   line-height: 1.35;
 }
+.publish-section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.publish-section-title {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
 .publish-tags {
   display: flex;
   flex-wrap: wrap;
@@ -612,6 +624,31 @@ label {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 2px 5px;
+}
+.platform-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.platform-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  padding: 8px;
+  min-width: 0;
+}
+.platform-name {
+  font-size: 11px;
+  color: var(--text-primary);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.platform-line {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
 }
 
 /* ── Video Player Modal ─────────────────────────── */

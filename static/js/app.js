@@ -575,7 +575,7 @@ function escapeHtml(value) {
 
 function renderPublishPack(clip) {
   const pack = clip.publish_pack || {};
-  if (!pack.title && !pack.thumbnail_path && !(pack.hashtags || []).length) return '';
+  if (!pack.title && !pack.thumbnail_path && !(pack.hashtags || []).length && !pack.platform_recommendations) return '';
 
   const hashtags = (pack.hashtags || []).map(tag => {
     const label = String(tag || '').startsWith('#') ? tag : `#${tag}`;
@@ -586,14 +586,66 @@ function renderPublishPack(clip) {
     ? `<img class="publish-thumb" src="/api/sessions/thumbnail?path=${encodeURIComponent(pack.thumbnail_path)}" alt="Thumbnail">`
     : '';
 
+  const subtitle = pack.subtitle || {};
+  const subtitleBlock = (subtitle.opening_line || subtitle.style)
+    ? `<div class="publish-section">
+        <div class="publish-section-title">Subtitle</div>
+        ${subtitle.opening_line ? `<div class="publish-description"><strong>Opening:</strong> ${escapeHtml(subtitle.opening_line)}</div>` : ''}
+        ${subtitle.style ? `<div class="publish-description"><strong>Style:</strong> ${escapeHtml(subtitle.style)}</div>` : ''}
+        <div class="publish-description"><strong>Status:</strong> ${subtitle.burned_in ? 'Burned into video' : 'Not burned in. Enable Add Captions before processing.'}</div>
+      </div>`
+    : '';
+
+  const platformBlock = renderPlatformRecommendations(pack.platform_recommendations || {});
+
   return `
     <div class="publish-pack">
       ${thumb}
       <div class="publish-copy">
         <div class="publish-label">Publish Pack</div>
         <div class="publish-title">${escapeHtml(pack.title || clip.title)}</div>
-        ${pack.description ? `<div class="publish-description">${escapeHtml(pack.description)}</div>` : ''}
+        ${pack.caption ? `<div class="publish-description"><strong>Caption:</strong> ${escapeHtml(pack.caption)}</div>` : ''}
+        ${pack.description ? `<div class="publish-description"><strong>Description:</strong> ${escapeHtml(pack.description)}</div>` : ''}
         ${hashtags ? `<div class="publish-tags">${hashtags}</div>` : ''}
+        ${subtitleBlock}
+        ${platformBlock}
+      </div>
+    </div>
+  `;
+}
+
+function renderPlatformRecommendations(recommendations) {
+  const entries = Object.entries(recommendations || {});
+  if (!entries.length) return '';
+
+  const labels = {
+    instagram: 'Instagram',
+    tiktok: 'TikTok',
+    facebook: 'Facebook',
+    youtube: 'YouTube',
+  };
+
+  return `
+    <div class="publish-section">
+      <div class="publish-section-title">Posting Recommendations</div>
+      <div class="platform-grid">
+        ${entries.map(([key, item]) => {
+          const tags = (item.hashtags || []).map(tag => {
+            const label = String(tag || '').startsWith('#') ? tag : `#${tag}`;
+            return `<span class="publish-tag">${escapeHtml(label)}</span>`;
+          }).join('');
+          return `
+            <div class="platform-card">
+              <div class="platform-name">${escapeHtml(labels[key] || key)}</div>
+              ${item.title ? `<div class="platform-line"><strong>Title:</strong> ${escapeHtml(item.title)}</div>` : ''}
+              ${item.caption ? `<div class="platform-line"><strong>Caption:</strong> ${escapeHtml(item.caption)}</div>` : ''}
+              ${tags ? `<div class="publish-tags">${tags}</div>` : ''}
+              ${item.best_time ? `<div class="platform-line"><strong>Time:</strong> ${escapeHtml(item.best_time)}</div>` : ''}
+              ${item.format ? `<div class="platform-line"><strong>Format:</strong> ${escapeHtml(item.format)}</div>` : ''}
+              ${item.posting_tip ? `<div class="platform-line"><strong>Tip:</strong> ${escapeHtml(item.posting_tip)}</div>` : ''}
+            </div>
+          `;
+        }).join('')}
       </div>
     </div>
   `;

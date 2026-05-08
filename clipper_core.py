@@ -2037,7 +2037,9 @@ Transcript:
         if add_publish_pack:
             try:
                 self.log("  Generating publish pack...")
-                metadata["publish_pack"] = self.generate_publish_pack(highlight, str(final_file), clip_dir)
+                metadata["publish_pack"] = self.generate_publish_pack(
+                    highlight, str(final_file), clip_dir, add_captions=add_captions
+                )
                 self.log("  ✓ Publish pack generated")
             except Exception as e:
                 metadata["publish_pack"] = {"error": str(e)}
@@ -2048,24 +2050,46 @@ Transcript:
         
         return metadata
     
-    def generate_publish_pack(self, highlight: dict, video_path: str, clip_dir: Path) -> dict:
-        """Generate title, hashtags, description, and a thumbnail image for a clip."""
-        pack = self._generate_publish_copy(highlight)
+    def generate_publish_pack(self, highlight: dict, video_path: str, clip_dir: Path, add_captions: bool = True) -> dict:
+        """Generate social publishing assets and a thumbnail image for a clip."""
+        pack = self._generate_publish_copy(highlight, add_captions=add_captions)
         thumbnail_path = clip_dir / "thumbnail.jpg"
         thumbnail_text = pack.get("thumbnail_text") or pack.get("title") or highlight.get("title", "Short Clip")
         self.create_thumbnail_image(video_path, str(thumbnail_path), thumbnail_text)
         pack["thumbnail_path"] = str(thumbnail_path)
+        pack["subtitle"]["burned_in"] = bool(add_captions)
+
+        with open(clip_dir / "publish_pack.json", "w", encoding="utf-8") as f:
+            json.dump(pack, f, ensure_ascii=False, indent=2)
+
+        caption_lines = [pack.get("title", ""), "", pack.get("caption") or pack.get("description", "")]
+        if pack.get("hashtags"):
+            caption_lines.extend(["", " ".join(f"#{str(tag).lstrip('#')}" for tag in pack["hashtags"])])
+        with open(clip_dir / "caption.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(line for line in caption_lines if line is not None).strip() + "\n")
+
         return pack
     
-    def _generate_publish_copy(self, highlight: dict) -> dict:
+    def _generate_publish_copy(self, highlight: dict, add_captions: bool = True) -> dict:
         """Generate publish metadata through the configured title generator."""
         fallback_title = highlight.get("title", "Short clip")
+        fallback_caption = highlight.get("description", highlight.get("hook_text", fallback_title))
         fallback = {
             "title": fallback_title,
-            "description": highlight.get("description", highlight.get("hook_text", fallback_title)),
+            "caption": fallback_caption,
+            "description": fallback_caption,
             "hashtags": ["shorts", "viral", "youtube", "clip"],
             "thumbnail_text": highlight.get("hook_text", fallback_title),
             "thumbnail_prompt": f"Use a high-contrast frame with text: {highlight.get('hook_text', fallback_title)}",
+            "subtitle": {
+                "burned_in": bool(add_captions),
+                "language": self.subtitle_language or "id",
+                "opening_line": highlight.get("hook_text", fallback_title),
+                "style": "Large high-contrast captions, 3-5 words per line, placed in the lower safe area.",
+            },
+            "platform_recommendations": self._default_platform_recommendations(
+                fallback_title, fallback_caption, ["shorts", "viral", "youtube", "clip"]
+            ),
         }
         
         tg_config = (self.ai_providers or {}).get("youtube_title_maker", {})
@@ -2082,17 +2106,21 @@ Transcript:
 Create a publish package for one short-form video clip.
 
 Return only JSON with these keys:
-- title: catchy YouTube Shorts title, max 70 characters
-- description: short Indonesian description, max 180 characters
+- title: catchy short-video title, max 70 characters
+- caption: Indonesian social caption, max 240 characters
+- description: short Indonesian video description, max 240 characters
 - hashtags: 8 to 12 relevant hashtags without spaces
 - thumbnail_text: bold thumbnail headline, max 6 words
 - thumbnail_prompt: concise visual direction for thumbnail design
+- subtitle: object with opening_line and style for burned-in subtitles
+- platform_recommendations: object with keys instagram, tiktok, facebook, youtube. Each platform must include title, caption, hashtags, best_time, format, and posting_tip.
 
 Clip data:
 Title: {highlight.get('title', '')}
 Hook: {highlight.get('hook_text', '')}
 Description: {highlight.get('description', '')}
 Channel: {self.channel_name}
+Burned-in captions enabled: {bool(add_captions)}
 """
         response = client.chat.completions.create(
             model=model,
@@ -2110,14 +2138,90 @@ Channel: {self.channel_name}
         hashtags = parsed.get("hashtags") or fallback["hashtags"]
         if isinstance(hashtags, str):
             hashtags = [tag.strip() for tag in re.split(r"[\s,]+", hashtags) if tag.strip()]
+        hashtags = [str(tag).strip().lstrip("#") for tag in hashtags if str(tag).strip()][:12]
+
+        caption = str(parsed.get("caption") or parsed.get("description") or fallback["caption"])[:280]
+        subtitle = parsed.get("subtitle") if isinstance(parsed.get("subtitle"), dict) else {}
+        platform_recommendations = parsed.get("platform_recommendations")
+        if not isinstance(platform_recommendations, dict):
+            platform_recommendations = self._default_platform_recommendations(
+                str(parsed.get("title") or fallback["title"])[:90], caption, hashtags
+            )
         
         return {
             "title": str(parsed.get("title") or fallback["title"])[:90],
-            "description": str(parsed.get("description") or fallback["description"])[:240],
-            "hashtags": [str(tag).strip().lstrip("#") for tag in hashtags if str(tag).strip()][:12],
+            "caption": caption,
+            "description": str(parsed.get("description") or caption or fallback["description"])[:280],
+            "hashtags": hashtags,
             "thumbnail_text": str(parsed.get("thumbnail_text") or fallback["thumbnail_text"])[:80],
             "thumbnail_prompt": str(parsed.get("thumbnail_prompt") or fallback["thumbnail_prompt"])[:300],
+            "subtitle": {
+                "burned_in": bool(add_captions),
+                "language": self.subtitle_language or "id",
+                "opening_line": str(subtitle.get("opening_line") or fallback["subtitle"]["opening_line"])[:120],
+                "style": str(subtitle.get("style") or fallback["subtitle"]["style"])[:240],
+            },
+            "platform_recommendations": self._normalize_platform_recommendations(
+                platform_recommendations, hashtags, caption
+            ),
         }
+
+    def _default_platform_recommendations(self, title: str, caption: str, hashtags: list) -> dict:
+        tags = [str(tag).strip().lstrip("#") for tag in hashtags if str(tag).strip()]
+        return {
+            "instagram": {
+                "title": title[:70],
+                "caption": caption[:220],
+                "hashtags": tags[:8],
+                "best_time": "18:00-21:00 local audience time",
+                "format": "Reels 9:16, 1080x1920, strong cover frame",
+                "posting_tip": "Use a short first line and pin the strongest question in comments.",
+            },
+            "tiktok": {
+                "title": title[:70],
+                "caption": caption[:180],
+                "hashtags": tags[:6],
+                "best_time": "12:00-14:00 or 19:00-22:00",
+                "format": "9:16, burned-in subtitles, fast opening hook",
+                "posting_tip": "Keep the caption direct and ask for a simple response.",
+            },
+            "facebook": {
+                "title": title[:80],
+                "caption": caption[:260],
+                "hashtags": tags[:5],
+                "best_time": "11:00-13:00 or 18:00-20:00",
+                "format": "Reels 9:16; also usable on feed",
+                "posting_tip": "Use a slightly fuller caption with context for broader audiences.",
+            },
+            "youtube": {
+                "title": title[:70],
+                "caption": caption[:240],
+                "hashtags": (tags + ["Shorts"])[:8],
+                "best_time": "17:00-20:00, then compare retention in analytics",
+                "format": "Shorts 9:16, less than 60 seconds when possible",
+                "posting_tip": "Put the main keyword in the title and first description line.",
+            },
+        }
+
+    def _normalize_platform_recommendations(self, recommendations: dict, hashtags: list, caption: str) -> dict:
+        defaults = self._default_platform_recommendations("", caption, hashtags)
+        normalized = {}
+        for platform, default in defaults.items():
+            item = recommendations.get(platform, {}) if isinstance(recommendations, dict) else {}
+            if not isinstance(item, dict):
+                item = {}
+            tags = item.get("hashtags", default["hashtags"])
+            if isinstance(tags, str):
+                tags = [tag.strip() for tag in re.split(r"[\s,]+", tags) if tag.strip()]
+            normalized[platform] = {
+                "title": str(item.get("title") or default["title"])[:90],
+                "caption": str(item.get("caption") or default["caption"])[:320],
+                "hashtags": [str(tag).strip().lstrip("#") for tag in tags if str(tag).strip()][:12],
+                "best_time": str(item.get("best_time") or default["best_time"])[:120],
+                "format": str(item.get("format") or default["format"])[:160],
+                "posting_tip": str(item.get("posting_tip") or default["posting_tip"])[:240],
+            }
+        return normalized
     
     def _parse_json_object(self, text: str) -> dict:
         """Parse a JSON object from a model response."""
