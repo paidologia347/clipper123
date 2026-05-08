@@ -12,6 +12,7 @@ import uuid
 import shutil
 import re
 import base64
+import copy
 from pathlib import Path
 from datetime import datetime
 
@@ -53,6 +54,41 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 config_manager = ConfigManager(CONFIG_FILE, OUTPUT_DIR)
 processing_lock = threading.Lock()
 active_jobs = {}  # job_id -> job info
+
+
+def get_runtime_ai_providers():
+    """Return AI provider config with private environment secret overrides applied."""
+    providers = copy.deepcopy(config_manager.get("ai_providers", {}) or {})
+
+    openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    caption_key = (os.environ.get("CAPTION_MAKER_API_KEY") or openai_key).strip()
+    if caption_key:
+        caption = providers.setdefault("caption_maker", {})
+        caption["api_key"] = caption_key
+        caption["base_url"] = os.environ.get("CAPTION_MAKER_BASE_URL", "https://api.openai.com/v1")
+        caption["model"] = os.environ.get("CAPTION_MAKER_MODEL", "whisper-1")
+
+    title_key = (os.environ.get("YOUTUBE_TITLE_MAKER_API_KEY") or openai_key).strip()
+    if title_key:
+        title = providers.setdefault("youtube_title_maker", {})
+        title["api_key"] = title_key
+        if os.environ.get("YOUTUBE_TITLE_MAKER_BASE_URL"):
+            title["base_url"] = os.environ["YOUTUBE_TITLE_MAKER_BASE_URL"]
+        else:
+            title.setdefault("base_url", "https://api.openai.com/v1")
+        if os.environ.get("YOUTUBE_TITLE_MAKER_MODEL"):
+            title["model"] = os.environ["YOUTUBE_TITLE_MAKER_MODEL"]
+        else:
+            title.setdefault("model", "gpt-4.1")
+
+    highlight_key = (os.environ.get("HIGHLIGHT_FINDER_API_KEY") or "").strip()
+    if highlight_key:
+        highlight = providers.setdefault("highlight_finder", {})
+        highlight["api_key"] = highlight_key
+        highlight["base_url"] = os.environ.get("HIGHLIGHT_FINDER_BASE_URL", "https://api.openai.com/v1")
+        highlight["model"] = os.environ.get("HIGHLIGHT_FINDER_MODEL", "gpt-4.1")
+
+    return providers
 
 
 def append_job_log(job_id, message):
@@ -450,7 +486,7 @@ def upload_source_video():
     if content_length and content_length > app.config["MAX_CONTENT_LENGTH"]:
         return jsonify({"error": f"Video is too large for this Space upload limit ({max_mb} MB). Use a shorter/compressed clip or upload through external storage."}), 413
 
-    caption_error = validate_caption_maker_for_whisper(config_manager.config.get("ai_providers", {}))
+    caption_error = validate_caption_maker_for_whisper(get_runtime_ai_providers())
     if caption_error:
         return jsonify({"error": caption_error, "needs_caption_maker": True}), 400
 
@@ -493,7 +529,7 @@ def _run_find_highlights(job_id, url, num_clips, subtitle_lang):
     from clipper_core import AutoClipperCore, SubtitleNotFoundError
 
     cfg = config_manager.config
-    ai_providers = cfg.get("ai_providers", {})
+    ai_providers = get_runtime_ai_providers()
 
     def log_cb(msg):
         append_job_log(job_id, msg)
@@ -614,7 +650,7 @@ def _run_find_highlights_from_upload(job_id, video_path, num_clips, title):
     from clipper_core import AutoClipperCore
 
     cfg = config_manager.config
-    ai_providers = cfg.get("ai_providers", {})
+    ai_providers = get_runtime_ai_providers()
 
     def log_cb(msg):
         append_job_log(job_id, msg)
@@ -770,7 +806,7 @@ def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook
     from clipper_core import AutoClipperCore
 
     cfg = config_manager.config
-    ai_providers = cfg.get("ai_providers", {})
+    ai_providers = get_runtime_ai_providers()
 
     def log_cb(msg):
         append_job_log(job_id, msg)
@@ -1012,7 +1048,7 @@ def generate_social_pack():
         from clipper_core import AutoClipperCore
 
         cfg = config_manager.config
-        ai_providers = cfg.get("ai_providers", {})
+        ai_providers = get_runtime_ai_providers()
         core = AutoClipperCore(
             client=None,
             ffmpeg_path=get_ffmpeg_path(),

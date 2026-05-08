@@ -245,6 +245,12 @@ Then open `http://localhost:5000` in your browser.
 | `PORT` | `5000` | Server port |
 | `SECRET_KEY` | auto | Flask secret key |
 | `FLASK_DEBUG` | `0` | Debug mode (`1` to enable) |
+| `OPENAI_API_KEY` | empty | Optional fallback key for OpenAI-compatible runtime tasks, including Caption Maker when no task-specific key is set |
+| `CAPTION_MAKER_API_KEY` | `OPENAI_API_KEY` | Whisper-compatible transcription key for uploaded videos and AI captions |
+| `CAPTION_MAKER_BASE_URL` | `https://api.openai.com/v1` | Caption Maker base URL; Puter AI is not supported for Whisper audio transcription |
+| `CAPTION_MAKER_MODEL` | `whisper-1` | Caption Maker model for `/audio/transcriptions` |
+| `YOUTUBE_TITLE_MAKER_API_KEY` | `OPENAI_API_KEY` | Optional key for Social Studio title, caption, hashtag, and platform recommendation generation |
+| `HIGHLIGHT_FINDER_API_KEY` | empty | Optional key for highlight detection if you do not want to configure it through the UI |
 
 ### Hugging Face Spaces Deployment
 
@@ -255,6 +261,7 @@ Deployment notes:
 - Hugging Face reads the Space metadata from the YAML block at the top of this `README.md`.
 - The included `Dockerfile` installs Python dependencies from `requirements_web.txt`, installs system FFmpeg, exposes port `7860`, and starts `python web_app.py`.
 - Store API keys and other private values as Hugging Face Space Variables or Secrets. Do not commit real API keys, cookies, or tokens to this repository.
+- For uploaded source videos, set `CAPTION_MAKER_API_KEY` or `OPENAI_API_KEY` as a Hugging Face Secret. Caption Maker must support OpenAI-compatible `/audio/transcriptions`; Puter AI does not.
 - Core processing requires FFmpeg, yt-dlp, an AI provider API key, and YouTube cookies for restricted videos. Long videos can be slow or fail on small CPU Spaces; test first with short videos.
 
 ---
