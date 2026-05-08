@@ -20,6 +20,7 @@
     <nav class="header-nav">
       <button onclick="showPage('home')" data-page="home" class="active">Home</button>
       <button onclick="showPage('sessions')" data-page="sessions">Sessions</button>
+      <button onclick="showPage('social')" data-page="social">Social Studio</button>
       <button onclick="showPage('settings')" data-page="settings">Settings</button>
       <button onclick="showPage('status')" data-page="status">Status</button>
     </nav>
@@ -245,6 +246,37 @@
   </div>
 
   <!-- ═══ SETTINGS PAGE ═══ -->
+  <div id="page-social" class="page">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; gap:12px;">
+      <div>
+        <h2>Social Studio</h2>
+        <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+          Edit finished clips and prepare platform-specific titles, thumbnails, hashtags, captions, and posting formats.
+        </p>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="loadSocialStudio()">Refresh</button>
+    </div>
+
+    <div class="social-layout">
+      <div class="card social-sidebar">
+        <div class="card-title">Finished Clips</div>
+        <div id="social-clip-list" class="social-clip-list">
+          <div class="empty-state">
+            <div class="empty-icon">ðŸ“‚</div>
+            <div class="empty-text">No clips loaded</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="social-editor" id="social-editor">
+        <div class="empty-state">
+          <div class="empty-icon">ðŸŽ¬</div>
+          <div class="empty-text">Choose a finished clip to edit its social package</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="page-settings" class="page">
     <div id="settings-main">
       <h2 style="margin-bottom:16px">⚙️ Settings</h2>

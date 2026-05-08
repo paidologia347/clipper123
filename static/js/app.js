@@ -8,6 +8,8 @@ let currentJobId = null;
 let currentSessionData = null;
 let highlights = [];
 let providers = [];
+let socialClips = [];
+let selectedSocialClipIndex = null;
 
 // ── Socket Events ──────────────────────────────────
 socket.on('connect', () => {
@@ -98,6 +100,7 @@ function showPage(name) {
 
   // Load data for specific pages
   if (name === 'sessions') loadSessions();
+  if (name === 'social') loadSocialStudio();
   if (name === 'status') loadLibStatus();
   if (name === 'settings') loadSettingsData();
 }
@@ -564,6 +567,186 @@ async function loadSessions() {
   }
 }
 
+// ── Social Studio ──────────────────────────────────
+async function loadSocialStudio() {
+  const list = document.getElementById('social-clip-list');
+  const editor = document.getElementById('social-editor');
+  if (!list || !editor) return;
+
+  list.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading clips...</div></div>';
+  editor.innerHTML = '<div class="empty-state"><div class="empty-icon">🎬</div><div class="empty-text">Choose a finished clip to edit its social package</div></div>';
+  selectedSocialClipIndex = null;
+
+  try {
+    const resp = await fetch('/api/sessions');
+    const sessions = await resp.json();
+    socialClips = [];
+    sessions.forEach(session => {
+      (session.clips || []).forEach(clip => {
+        socialClips.push({...clip, session_name: session.name});
+      });
+    });
+
+    if (!socialClips.length) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">📂</div><div class="empty-text">No finished clips yet</div></div>';
+      return;
+    }
+
+    list.innerHTML = socialClips.map((clip, idx) => `
+      <button class="social-clip-btn" id="social-clip-${idx}" onclick="selectSocialClip(${idx})">
+        <span class="social-clip-title">${escapeHtml(clip.title || clip.name)}</span>
+        <span class="social-clip-meta">${escapeHtml(clip.session_name || '')} ${clip.duration ? `• ${Math.round(clip.duration)}s` : ''}</span>
+      </button>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">Failed to load clips</div></div>';
+  }
+}
+
+function selectSocialClip(index) {
+  selectedSocialClipIndex = index;
+  document.querySelectorAll('.social-clip-btn').forEach(btn => btn.classList.remove('active'));
+  const btn = document.getElementById(`social-clip-${index}`);
+  if (btn) btn.classList.add('active');
+  renderSocialEditor(socialClips[index]);
+}
+
+function renderSocialEditor(clip) {
+  const editor = document.getElementById('social-editor');
+  const pack = clip.publish_pack || {};
+  const platforms = pack.platform_recommendations || {};
+  const thumb = pack.thumbnail_path
+    ? `/api/sessions/thumbnail?path=${encodeURIComponent(pack.thumbnail_path)}`
+    : '';
+
+  editor.innerHTML = `
+    <div class="social-preview">
+      <video controls src="/api/sessions/video?path=${encodeURIComponent(clip.video_path)}"></video>
+      ${thumb ? `<img src="${thumb}" alt="Thumbnail">` : '<div class="social-thumb-empty">No thumbnail</div>'}
+    </div>
+
+    <div class="card">
+      <div class="card-title">AI Social Package</div>
+      <div class="form-grid">
+        <label>Title<input id="social-title" value="${escapeAttr(pack.title || clip.title || '')}"></label>
+        <label>Thumbnail Text<input id="social-thumbnail-text" value="${escapeAttr(pack.thumbnail_text || '')}"></label>
+        <label class="full">Caption<textarea id="social-caption" rows="3">${escapeHtml(pack.caption || pack.description || '')}</textarea></label>
+        <label class="full">Hashtags<input id="social-hashtags" value="${escapeAttr((pack.hashtags || []).map(tag => `#${String(tag).replace(/^#/, '')}`).join(' '))}"></label>
+        <label class="full">Subtitle Direction<textarea id="social-subtitle-style" rows="2">${escapeHtml((pack.subtitle || {}).style || '')}</textarea></label>
+      </div>
+      <div class="btn-group" style="margin-top:12px">
+        <button class="btn btn-primary btn-sm" onclick="generateSocialPack()">Generate with AI</button>
+        <button class="btn btn-success btn-sm" onclick="saveSocialPack()">Save Edits</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Platform Formats</div>
+      <div class="social-platform-editor">
+        ${['instagram', 'tiktok', 'facebook', 'youtube'].map(platform => renderPlatformEditor(platform, platforms[platform] || {})).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderPlatformEditor(platform, item) {
+  const label = {instagram: 'Instagram Reels', tiktok: 'TikTok', facebook: 'Facebook Reels', youtube: 'YouTube Shorts'}[platform] || platform;
+  return `
+    <div class="platform-edit-card" data-platform="${platform}">
+      <div class="platform-name">${escapeHtml(label)}</div>
+      <label>Title<input id="${platform}-title" value="${escapeAttr(item.title || '')}"></label>
+      <label>Caption<textarea id="${platform}-caption" rows="3">${escapeHtml(item.caption || '')}</textarea></label>
+      <label>Hashtags<input id="${platform}-hashtags" value="${escapeAttr((item.hashtags || []).map(tag => `#${String(tag).replace(/^#/, '')}`).join(' '))}"></label>
+      <label>Best Time<input id="${platform}-best-time" value="${escapeAttr(item.best_time || '')}"></label>
+      <label>Format<input id="${platform}-format" value="${escapeAttr(item.format || '')}"></label>
+      <label>Posting Tip<textarea id="${platform}-tip" rows="2">${escapeHtml(item.posting_tip || '')}</textarea></label>
+    </div>
+  `;
+}
+
+function collectSocialPack() {
+  const platforms = {};
+  ['instagram', 'tiktok', 'facebook', 'youtube'].forEach(platform => {
+    platforms[platform] = {
+      title: document.getElementById(`${platform}-title`)?.value || '',
+      caption: document.getElementById(`${platform}-caption`)?.value || '',
+      hashtags: splitHashtags(document.getElementById(`${platform}-hashtags`)?.value || ''),
+      best_time: document.getElementById(`${platform}-best-time`)?.value || '',
+      format: document.getElementById(`${platform}-format`)?.value || '',
+      posting_tip: document.getElementById(`${platform}-tip`)?.value || '',
+    };
+  });
+
+  return {
+    title: document.getElementById('social-title')?.value || '',
+    caption: document.getElementById('social-caption')?.value || '',
+    description: document.getElementById('social-caption')?.value || '',
+    hashtags: splitHashtags(document.getElementById('social-hashtags')?.value || ''),
+    thumbnail_text: document.getElementById('social-thumbnail-text')?.value || '',
+    subtitle: {
+      style: document.getElementById('social-subtitle-style')?.value || '',
+      burned_in: true,
+      language: 'id',
+    },
+    platform_recommendations: platforms,
+  };
+}
+
+function splitHashtags(value) {
+  return String(value || '')
+    .split(/[\s,]+/)
+    .map(tag => tag.trim().replace(/^#/, ''))
+    .filter(Boolean);
+}
+
+async function generateSocialPack() {
+  const clip = socialClips[selectedSocialClipIndex];
+  if (!clip) return;
+  showToast('Generating social recommendations...', 'success');
+  const resp = await fetch('/api/social/generate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      video_path: clip.video_path,
+      title: document.getElementById('social-title')?.value || clip.title,
+      hook_text: clip.hook_text || clip.title,
+      description: document.getElementById('social-caption')?.value || '',
+    }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    showToast(data.error || 'Failed to generate social package', 'error');
+    return;
+  }
+  socialClips[selectedSocialClipIndex].publish_pack = data.publish_pack;
+  renderSocialEditor(socialClips[selectedSocialClipIndex]);
+  showToast('Social package generated', 'success');
+}
+
+async function saveSocialPack() {
+  const clip = socialClips[selectedSocialClipIndex];
+  if (!clip) return;
+  const pack = collectSocialPack();
+  const resp = await fetch('/api/social/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      video_path: clip.video_path,
+      title: pack.title,
+      hook_text: clip.hook_text || pack.title,
+      publish_pack: pack,
+    }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    showToast(data.error || 'Failed to save social package', 'error');
+    return;
+  }
+  socialClips[selectedSocialClipIndex].publish_pack = data.publish_pack;
+  socialClips[selectedSocialClipIndex].title = pack.title;
+  showToast('Social package saved', 'success');
+}
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -571,6 +754,10 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/`/g, '&#96;');
 }
 
 function renderPublishPack(clip) {

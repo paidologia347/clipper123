@@ -982,6 +982,114 @@ def serve_thumbnail():
     return send_file(path, mimetype="image/jpeg")
 
 
+def _clip_data_file_from_video(video_path: str) -> Path:
+    path = Path(video_path)
+    if not path.exists() or path.name != "master.mp4":
+        raise ValueError("Valid clip master.mp4 path is required")
+
+    output_dir = Path(config_manager.get("output_dir", str(OUTPUT_DIR))).resolve()
+    resolved = path.resolve()
+    if output_dir not in resolved.parents:
+        raise ValueError("Clip path is outside output directory")
+
+    data_file = resolved.parent / "data.json"
+    if not data_file.exists():
+        raise ValueError("Clip metadata data.json not found")
+    return data_file
+
+
+@app.route("/api/social/generate", methods=["POST"])
+def generate_social_pack():
+    """Generate or regenerate social publishing recommendations for an existing clip."""
+    data = request.json or {}
+    video_path = data.get("video_path", "")
+
+    try:
+        data_file = _clip_data_file_from_video(video_path)
+        with open(data_file, "r", encoding="utf-8") as f:
+            clip_data = json.load(f)
+
+        from clipper_core import AutoClipperCore
+
+        cfg = config_manager.config
+        ai_providers = cfg.get("ai_providers", {})
+        core = AutoClipperCore(
+            client=None,
+            ffmpeg_path=get_ffmpeg_path(),
+            ytdlp_path=get_ytdlp_path(),
+            output_dir=cfg.get("output_dir", str(OUTPUT_DIR)),
+            model=cfg.get("model", "gpt-4.1"),
+            tts_model=cfg.get("tts_model", "tts-1"),
+            temperature=cfg.get("temperature", 1.0),
+            system_prompt=cfg.get("system_prompt"),
+            watermark_settings=cfg.get("watermark", {"enabled": False}),
+            credit_watermark_settings=cfg.get("credit_watermark", {"enabled": False}),
+            face_tracking_mode=cfg.get("face_tracking_mode", "opencv"),
+            mediapipe_settings=cfg.get("mediapipe_settings"),
+            ai_providers=ai_providers,
+            subtitle_language=data.get("subtitle_language", "id"),
+        )
+        core.channel_name = clip_data.get("channel_name", "")
+
+        highlight = {
+            "title": data.get("title") or clip_data.get("title", ""),
+            "hook_text": data.get("hook_text") or clip_data.get("hook_text", clip_data.get("title", "")),
+            "description": data.get("description") or clip_data.get("description", clip_data.get("hook_text", "")),
+        }
+        pack = core.generate_publish_pack(
+            highlight,
+            str(Path(video_path)),
+            data_file.parent,
+            add_captions=bool(clip_data.get("has_captions")),
+        )
+
+        clip_data["title"] = highlight["title"] or clip_data.get("title", "")
+        clip_data["hook_text"] = highlight["hook_text"] or clip_data.get("hook_text", "")
+        clip_data["description"] = highlight["description"] or clip_data.get("description", "")
+        clip_data["publish_pack"] = pack
+        with open(data_file, "w", encoding="utf-8") as f:
+            json.dump(clip_data, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "ok", "publish_pack": pack})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/social/save", methods=["POST"])
+def save_social_pack():
+    """Save manual edits to a clip's social publishing package."""
+    data = request.json or {}
+    video_path = data.get("video_path", "")
+    pack = data.get("publish_pack") or {}
+
+    try:
+        data_file = _clip_data_file_from_video(video_path)
+        with open(data_file, "r", encoding="utf-8") as f:
+            clip_data = json.load(f)
+
+        clip_data["publish_pack"] = pack
+        if data.get("title"):
+            clip_data["title"] = data["title"]
+        if data.get("hook_text"):
+            clip_data["hook_text"] = data["hook_text"]
+
+        with open(data_file, "w", encoding="utf-8") as f:
+            json.dump(clip_data, f, ensure_ascii=False, indent=2)
+
+        caption_lines = [pack.get("title", ""), "", pack.get("caption") or pack.get("description", "")]
+        if pack.get("hashtags"):
+            caption_lines.extend(["", " ".join(f"#{str(tag).lstrip('#')}" for tag in pack["hashtags"])])
+        with open(data_file.parent / "caption.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(line for line in caption_lines if line is not None).strip() + "\n")
+
+        with open(data_file.parent / "publish_pack.json", "w", encoding="utf-8") as f:
+            json.dump(pack, f, ensure_ascii=False, indent=2)
+
+        return jsonify({"status": "saved", "publish_pack": pack})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
 @app.route("/api/sessions/download", methods=["GET"])
 def download_video():
     """Download a video file"""

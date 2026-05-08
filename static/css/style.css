@@ -837,3 +837,99 @@ label {
 
 .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
 .empty-state .empty-text { font-size: 14px; }
+
+/* Social Studio */
+.social-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.social-sidebar { position: sticky; top: 12px; }
+.social-clip-list { display: flex; flex-direction: column; gap: 8px; }
+.social-clip-btn {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 9px;
+  cursor: pointer;
+}
+.social-clip-btn.active,
+.social-clip-btn:hover {
+  border-color: var(--accent);
+  background: rgba(59,142,208,0.12);
+}
+.social-clip-title { display: block; font-size: 12px; font-weight: 600; line-height: 1.35; }
+.social-clip-meta { display: block; margin-top: 3px; font-size: 10px; color: var(--text-muted); }
+.social-editor { min-width: 0; }
+.social-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.social-preview video,
+.social-preview img,
+.social-thumb-empty {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+.social-preview video { max-height: 420px; }
+.social-preview img,
+.social-thumb-empty { aspect-ratio: 9 / 16; object-fit: cover; }
+.social-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.form-grid,
+.social-platform-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.form-grid label,
+.platform-edit-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.form-grid .full { grid-column: 1 / -1; }
+.form-grid input,
+.form-grid textarea,
+.platform-edit-card input,
+.platform-edit-card textarea {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 8px;
+  font: inherit;
+  resize: vertical;
+}
+.platform-edit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  padding: 10px;
+}
+@media (max-width: 780px) {
+  .social-layout,
+  .social-preview,
+  .form-grid,
+  .social-platform-editor { grid-template-columns: 1fr; }
+  .social-sidebar { position: static; }
+}
