@@ -37,6 +37,7 @@ APP_DIR = get_app_dir()
 CONFIG_FILE = APP_DIR / "config.json"
 OUTPUT_DIR = APP_DIR / "output"
 COOKIES_FILE = APP_DIR / "cookies.txt"
+JOBS_FILE = OUTPUT_DIR / "_jobs.json"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -53,7 +54,40 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 # ── Global State ─────────────────────────────────────────────────────
 config_manager = ConfigManager(CONFIG_FILE, OUTPUT_DIR)
 processing_lock = threading.Lock()
-active_jobs = {}  # job_id -> job info
+
+
+def _json_safe_job(job):
+    safe = {k: v for k, v in (job or {}).items() if k != "thread"}
+    return safe
+
+
+def save_job_store():
+    try:
+        JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(JOBS_FILE, "w", encoding="utf-8") as f:
+            json.dump({jid: _json_safe_job(job) for jid, job in active_jobs.items()}, f, ensure_ascii=False, indent=2, default=str)
+    except Exception as e:
+        debug_log(f"Could not save job store: {e}")
+
+
+def load_job_store():
+    if not JOBS_FILE.exists():
+        return {}
+    try:
+        with open(JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            for job in data.values():
+                if job.get("status") == "running":
+                    job["status"] = "interrupted"
+                    job["error"] = "Server restarted while this job was running."
+            return data
+    except Exception as e:
+        debug_log(f"Could not load job store: {e}")
+    return {}
+
+
+active_jobs = load_job_store()  # job_id -> job info
 
 
 def get_runtime_ai_providers():
@@ -97,6 +131,7 @@ def append_job_log(job_id, message):
     logs.append(str(message))
     if len(logs) > 200:
         del logs[:-200]
+    save_job_store()
 
 
 def validate_caption_maker_for_whisper(ai_providers):
@@ -124,6 +159,55 @@ def validate_caption_maker_for_whisper(ai_providers):
         return "OpenAI Caption Maker should use model whisper-1 for audio transcription."
 
     return None
+
+
+def save_session_file(output_dir, session_id, session_data):
+    session_file = Path(output_dir) / f"_session_{session_id}.json"
+    session_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(session_file, "w", encoding="utf-8") as f:
+        json.dump(session_data, f, ensure_ascii=False, indent=2, default=str)
+    return session_file
+
+
+def load_session_file(session_id):
+    output_dir = Path(config_manager.get("output_dir", str(OUTPUT_DIR)))
+    session_file = output_dir / f"_session_{session_id}.json"
+    if not session_file.exists():
+        return None, session_file
+    with open(session_file, "r", encoding="utf-8") as f:
+        return json.load(f), session_file
+
+
+def normalize_external_video_url(url):
+    url = (url or "").strip()
+    drive_match = re.search(r"drive\.google\.com/file/d/([^/]+)", url)
+    if drive_match:
+        return f"https://drive.google.com/uc?export=download&id={drive_match.group(1)}"
+    drive_id_match = re.search(r"[?&]id=([^&]+)", url)
+    if "drive.google.com" in url and drive_id_match:
+        return f"https://drive.google.com/uc?export=download&id={drive_id_match.group(1)}"
+    return url
+
+
+def download_external_video(url, target_path, max_mb):
+    import requests
+
+    final_url = normalize_external_video_url(url)
+    with requests.get(final_url, stream=True, timeout=30, allow_redirects=True) as resp:
+        resp.raise_for_status()
+        size = int(resp.headers.get("content-length") or 0)
+        if size and size > max_mb * 1024 * 1024:
+            raise Exception(f"External file is larger than the configured limit ({max_mb} MB).")
+
+        written = 0
+        with open(target_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if not chunk:
+                    continue
+                written += len(chunk)
+                if written > max_mb * 1024 * 1024:
+                    raise Exception(f"External file exceeded the configured limit ({max_mb} MB).")
+                f.write(chunk)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -458,6 +542,7 @@ def start_processing():
         "status": "running",
         "logs": [],
     }
+    save_job_store()
 
     def run_job():
         try:
@@ -469,6 +554,60 @@ def start_processing():
     active_jobs[job_id]["thread"] = t
     t.start()
     return jsonify({"job_id": job_id, "status": "started"})
+
+
+@app.route("/api/source/import", methods=["POST"])
+def import_source_video():
+    """Download a source video from external storage, then process it like an uploaded video."""
+    data = request.json or {}
+    source_url = (data.get("source_url") or "").strip()
+    title = (data.get("title") or "External source video").strip()
+    num_clips = int(data.get("num_clips", 5))
+
+    if not source_url:
+        return jsonify({"error": "External video URL is required"}), 400
+
+    caption_error = validate_caption_maker_for_whisper(get_runtime_ai_providers())
+    if caption_error:
+        return jsonify({"error": caption_error, "needs_caption_maker": True}), 400
+
+    if not processing_lock.acquire(blocking=False):
+        return jsonify({"error": "Another job is running", "busy": True}), 409
+
+    job_id = str(uuid.uuid4())[:8]
+    upload_dir = OUTPUT_DIR / "_uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", title)[:80] or "external_video"
+    upload_path = upload_dir / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}.mp4"
+
+    active_jobs[job_id] = {
+        "type": "find_highlights_external",
+        "source_url": source_url,
+        "video_path": str(upload_path),
+        "status": "running",
+        "logs": [],
+    }
+    save_job_store()
+
+    def run_job():
+        try:
+            append_job_log(job_id, "Downloading external source video...")
+            max_mb = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
+            download_external_video(source_url, upload_path, max_mb)
+            _run_find_highlights_from_upload(job_id, str(upload_path), num_clips, title)
+        except Exception as e:
+            active_jobs[job_id]["status"] = "error"
+            active_jobs[job_id]["error"] = str(e)
+            save_job_store()
+            socketio.emit("job_error", {"job_id": job_id, "error": str(e)})
+            append_job_log(job_id, f"Error: {e}")
+        finally:
+            processing_lock.release()
+
+    t = threading.Thread(target=run_job, daemon=True)
+    active_jobs[job_id]["thread"] = t
+    t.start()
+    return jsonify({"job_id": job_id, "status": "started", "video_path": str(upload_path)})
 
 
 @app.route("/api/source/upload", methods=["POST"])
@@ -510,6 +649,7 @@ def upload_source_video():
         "status": "running",
         "logs": [],
     }
+    save_job_store()
 
     def run_job():
         try:
@@ -608,6 +748,9 @@ def _run_find_highlights(job_id, url, num_clips, subtitle_lang):
         # Store session data
         session_dir = str(core.temp_dir)
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        transcript_file = Path(output_dir) / f"_transcript_{session_id}.txt"
+        transcript_file.parent.mkdir(parents=True, exist_ok=True)
+        transcript_file.write_text(transcript, encoding="utf-8")
 
         # Save session
         session_data = {
@@ -615,24 +758,25 @@ def _run_find_highlights(job_id, url, num_clips, subtitle_lang):
             "video_path": str(video_path),
             "video_info": video_info or {},
             "highlights": highlights,
+            "transcript": transcript,
+            "transcript_path": str(transcript_file),
             "session_dir": session_dir,
             "channel_name": channel_name,
             "use_whisper": use_whisper,
         }
 
-        session_file = Path(output_dir) / f"_session_{session_id}.json"
-        session_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(session_file, "w") as f:
-            json.dump(session_data, f, indent=2, default=str)
+        save_session_file(output_dir, session_id, session_data)
 
         active_jobs[job_id]["status"] = "highlights_ready"
         active_jobs[job_id]["session_data"] = session_data
+        save_job_store()
 
         progress_cb("Highlights found!", 1.0)
         socketio.emit("highlights_ready", {
             "job_id": job_id,
             "session_id": session_id,
             "highlights": highlights,
+            "transcript": transcript,
             "video_info": video_info or {},
             "channel_name": channel_name,
         })
@@ -640,6 +784,7 @@ def _run_find_highlights(job_id, url, num_clips, subtitle_lang):
     except Exception as e:
         active_jobs[job_id]["status"] = "error"
         active_jobs[job_id]["error"] = str(e)
+        save_job_store()
         socketio.emit("job_error", {"job_id": job_id, "error": str(e)})
         log_cb(f"Error: {e}")
 
@@ -714,30 +859,35 @@ def _run_find_highlights_from_upload(job_id, video_path, num_clips, title):
             raise Exception("No valid highlights found from uploaded video")
 
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        transcript = result.get("transcript", "")
+        transcript_file = Path(output_dir) / f"_transcript_{session_id}.txt"
+        transcript_file.parent.mkdir(parents=True, exist_ok=True)
+        transcript_file.write_text(transcript, encoding="utf-8")
         session_data = {
             "session_id": session_id,
             "video_path": str(video_path),
             "video_info": video_info,
             "highlights": result["highlights"],
+            "transcript": transcript,
+            "transcript_path": str(transcript_file),
             "session_dir": result.get("session_dir", ""),
             "channel_name": video_info["channel"],
             "use_whisper": True,
             "source_type": "upload",
         }
 
-        session_file = Path(output_dir) / f"_session_{session_id}.json"
-        session_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(session_file, "w") as f:
-            json.dump(session_data, f, indent=2, default=str)
+        save_session_file(output_dir, session_id, session_data)
 
         active_jobs[job_id]["status"] = "highlights_ready"
         active_jobs[job_id]["session_data"] = session_data
+        save_job_store()
 
         progress_cb("Highlights found!", 1.0)
         socketio.emit("highlights_ready", {
             "job_id": job_id,
             "session_id": session_id,
             "highlights": result["highlights"],
+            "transcript": transcript,
             "video_info": video_info,
             "channel_name": video_info["channel"],
         })
@@ -745,6 +895,7 @@ def _run_find_highlights_from_upload(job_id, video_path, num_clips, title):
     except Exception as e:
         active_jobs[job_id]["status"] = "error"
         active_jobs[job_id]["error"] = str(e)
+        save_job_store()
         socketio.emit("job_error", {"job_id": job_id, "error": str(e)})
         log_cb(f"Error: {e}")
 
@@ -763,6 +914,7 @@ def start_clipping():
     add_captions = data.get("add_captions", False)
     add_hook = data.get("add_hook", False)
     add_publish_pack = data.get("add_publish_pack", True)
+    caption_style = data.get("caption_style", "capcut")
 
     # Find session data
     session_data = None
@@ -785,11 +937,12 @@ def start_clipping():
     if not processing_lock.acquire(blocking=False):
         return jsonify({"error": "Another job is running", "busy": True}), 409
 
-    active_jobs[clip_job_id] = {"type": "clipping", "status": "running", "logs": []}
+    active_jobs[clip_job_id] = {"type": "clipping", "status": "running", "logs": [], "caption_style": caption_style}
+    save_job_store()
 
     def run_clip():
         try:
-            _run_clipping(clip_job_id, session_data, selected_indices, add_captions, add_hook, add_publish_pack)
+            _run_clipping(clip_job_id, session_data, selected_indices, add_captions, add_hook, add_publish_pack, caption_style)
         finally:
             processing_lock.release()
 
@@ -800,7 +953,7 @@ def start_clipping():
     return jsonify({"job_id": clip_job_id, "status": "started"})
 
 
-def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook, add_publish_pack):
+def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook, add_publish_pack, caption_style="capcut"):
     """Background: clip selected highlights"""
     from openai import OpenAI
     from clipper_core import AutoClipperCore
@@ -856,6 +1009,7 @@ def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook
             face_tracking_mode=cfg.get("face_tracking_mode", "opencv"),
             mediapipe_settings=cfg.get("mediapipe_settings"),
             ai_providers=ai_providers,
+            caption_style=caption_style,
             log_callback=log_cb,
             progress_callback=progress_cb,
         )
@@ -897,6 +1051,7 @@ def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook
 
         active_jobs[job_id]["status"] = "complete"
         active_jobs[job_id]["clips"] = created_clips
+        save_job_store()
 
         progress_cb("All clips created!", 1.0)
         socketio.emit("clipping_complete", {
@@ -907,6 +1062,8 @@ def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook
 
     except Exception as e:
         active_jobs[job_id]["status"] = "error"
+        active_jobs[job_id]["error"] = str(e)
+        save_job_store()
         socketio.emit("job_error", {"job_id": job_id, "error": str(e)})
         log_cb(f"Error: {e}")
 
@@ -950,7 +1107,85 @@ def cancel_job(job_id):
     if not job:
         return jsonify({"error": "Job not found"}), 404
     job["status"] = "cancelled"
+    save_job_store()
     return jsonify({"status": "cancelled"})
+
+
+@app.route("/api/session/<session_id>/transcript", methods=["GET", "POST"])
+def session_transcript(session_id):
+    session_data, session_file = load_session_file(session_id)
+    if not session_data:
+        return jsonify({"error": "Session not found"}), 404
+
+    output_dir = config_manager.get("output_dir", str(OUTPUT_DIR))
+    transcript_path = session_data.get("transcript_path")
+    transcript = session_data.get("transcript", "")
+    if transcript_path and Path(transcript_path).exists():
+        transcript = Path(transcript_path).read_text(encoding="utf-8")
+
+    if request.method == "GET":
+        return jsonify({
+            "session_id": session_id,
+            "transcript": transcript,
+            "highlights": session_data.get("highlights", []),
+        })
+
+    data = request.json or {}
+    transcript = data.get("transcript", transcript)
+    regenerate = bool(data.get("regenerate", False))
+    num_clips = int(data.get("num_clips") or len(session_data.get("highlights", [])) or 5)
+
+    if not transcript.strip():
+        return jsonify({"error": "Transcript cannot be empty"}), 400
+
+    if not transcript_path:
+        transcript_path = str(Path(output_dir) / f"_transcript_{session_id}.txt")
+    Path(transcript_path).write_text(transcript, encoding="utf-8")
+    session_data["transcript"] = transcript
+    session_data["transcript_path"] = transcript_path
+
+    if regenerate:
+        from openai import OpenAI
+        from clipper_core import AutoClipperCore
+
+        cfg = config_manager.config
+        ai_providers = get_runtime_ai_providers()
+        hf_config = ai_providers.get("highlight_finder", {})
+        client = OpenAI(
+            api_key=hf_config.get("api_key", ""),
+            base_url=hf_config.get("base_url", "https://api.openai.com/v1"),
+        ) if hf_config.get("api_key") else None
+        core = AutoClipperCore(
+            client=client,
+            ffmpeg_path=get_ffmpeg_path(),
+            ytdlp_path=get_ytdlp_path(),
+            output_dir=output_dir,
+            model=hf_config.get("model", "gpt-4.1"),
+            tts_model=cfg.get("tts_model", "tts-1"),
+            temperature=cfg.get("temperature", 1.0),
+            system_prompt=cfg.get("system_prompt"),
+            watermark_settings=cfg.get("watermark", {"enabled": False}),
+            credit_watermark_settings=cfg.get("credit_watermark", {"enabled": False}),
+            face_tracking_mode=cfg.get("face_tracking_mode", "opencv"),
+            mediapipe_settings=cfg.get("mediapipe_settings"),
+            ai_providers=ai_providers,
+        )
+        core.channel_name = session_data.get("channel_name", "")
+        highlights = core.find_highlights(transcript, session_data.get("video_info", {}), num_clips)
+        session_data["highlights"] = highlights
+
+        for job in active_jobs.values():
+            if (job.get("session_data") or {}).get("session_id") == session_id:
+                job["session_data"] = session_data
+        save_job_store()
+
+    save_session_file(output_dir, session_id, session_data)
+    return jsonify({
+        "status": "saved",
+        "session_id": session_id,
+        "transcript": transcript,
+        "highlights": session_data.get("highlights", []),
+    })
 
 
 # ════════════════════════════════════════════════════════════════════

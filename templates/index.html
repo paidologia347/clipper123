@@ -78,6 +78,15 @@
           </div>
         </div>
 
+        <div class="card">
+          <div class="card-title">External Video URL</div>
+          <p style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+            Use a direct MP4/MOV/WebM link or a public Google Drive share link for larger files.
+          </p>
+          <input type="url" id="external-source-url" placeholder="https://drive.google.com/file/d/... or direct .mp4 URL">
+          <input type="text" id="external-source-title" placeholder="Optional video title" style="margin-top:8px;">
+        </div>
+
         <!-- Cookies -->
         <div class="card">
           <div class="card-title">YouTube Cookies</div>
@@ -176,6 +185,17 @@
         <span class="toggle-label">💬 Add Captions</span>
         <label class="switch"><input type="checkbox" id="toggle-captions"><span class="slider"></span></label>
       </div>
+      <div class="form-row" style="margin:8px 0;">
+        <span class="toggle-label">Caption Style</span>
+        <select id="caption-style" style="flex:1;">
+          <option value="capcut">CapCut Highlight</option>
+          <option value="bold-center">Bold Center</option>
+          <option value="neon-pop">Neon Pop</option>
+          <option value="minimal-clean">Minimal Clean</option>
+          <option value="typewriter">Typewriter</option>
+          <option value="bubble">Bubble</option>
+        </select>
+      </div>
       <div class="toggle-row">
         <span class="toggle-label">🪝 Add Hook Text</span>
         <label class="switch"><input type="checkbox" id="toggle-hook"><span class="slider"></span></label>
@@ -186,6 +206,18 @@
       </div>
       <div style="font-size:11px; color:var(--text-muted); margin-top:8px;">
         Publish Pack creates thumbnail, title, caption, hashtags, subtitle guidance, and posting recommendations for Instagram, TikTok, Facebook, and YouTube.
+      </div>
+    </div>
+
+    <div class="card" id="transcript-card" style="display:none;">
+      <div class="card-title">Transcript Viewer / Editor</div>
+      <p style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+        Edit transcript text before clipping. Save only updates transcript; regenerate also recalculates highlight suggestions.
+      </p>
+      <textarea id="transcript-editor" rows="10" style="width:100%;"></textarea>
+      <div class="btn-group" style="margin-top:8px">
+        <button class="btn btn-secondary btn-sm" onclick="saveTranscript(false)">Save Transcript</button>
+        <button class="btn btn-primary btn-sm" onclick="saveTranscript(true)">Save & Regenerate Highlights</button>
       </div>
     </div>
 

@@ -91,6 +91,7 @@ class AutoClipperCore:
         mediapipe_settings: dict = None,
         ai_providers: dict = None,
         subtitle_language: str = "id",
+        caption_style: str = "capcut",
         log_callback=None,
         progress_callback=None,
         token_callback=None,
@@ -156,10 +157,13 @@ class AutoClipperCore:
             "center_weight": 0.3
         }
         self.subtitle_language = subtitle_language
+        self.caption_style = caption_style or "capcut"
         self.log = log_callback or print
         self.set_progress = progress_callback or (lambda s, p: None)
         self.report_tokens = token_callback or (lambda gi, go, w, t: None)
         self.is_cancelled = cancel_check or (lambda: False)
+        self.last_transcript_text = ""
+        self.last_transcript_segments = []
         
         # GPU acceleration settings
         self.gpu_enabled = False
@@ -1366,6 +1370,8 @@ Transcript:
                 lines.append(f"[{start_ts} - {end_ts}] {text}")
         
         transcript = "\n".join(lines)
+        self.last_transcript_text = transcript
+        self.last_transcript_segments = all_segments
         self.log(f"  ✓ Transcription complete: {len(lines)} segments")
         
         return transcript
@@ -1600,6 +1606,8 @@ Transcript:
             "session_dir": str(session_dir),
             "video_path": video_path,
             "srt_path": None,
+            "transcript": transcript,
+            "transcript_segments": self.last_transcript_segments,
             "highlights": highlights,
             "video_info": video_info,
             "created_at": datetime.now().isoformat(),
@@ -3062,9 +3070,42 @@ Burned-in captions enabled: {bool(add_captions)}
     
     def create_ass_subtitle_capcut(self, transcript, output_path: str, time_offset: float = 0):
         """Create ASS subtitle file with CapCut-style word-by-word highlighting"""
+        style_presets = {
+            "capcut": {
+                "font": "Arial Black", "size": 65, "primary": "&H00FFFFFF",
+                "highlight": "&H0000FFFF", "outline": "&H00000000", "back": "&H80000000",
+                "bold": "-1", "outline_w": 4, "shadow": 2, "margin_v": 400, "box": 1,
+            },
+            "bold-center": {
+                "font": "Arial Black", "size": 70, "primary": "&H00FFFFFF",
+                "highlight": "&H0000FFFF", "outline": "&H00000000", "back": "&H80000000",
+                "bold": "-1", "outline_w": 5, "shadow": 1, "margin_v": 520, "box": 1,
+            },
+            "neon-pop": {
+                "font": "Arial Black", "size": 66, "primary": "&H00FF6BFF",
+                "highlight": "&H003DD9FF", "outline": "&H00000000", "back": "&H80221440",
+                "bold": "-1", "outline_w": 4, "shadow": 3, "margin_v": 430, "box": 1,
+            },
+            "minimal-clean": {
+                "font": "Arial", "size": 54, "primary": "&H00FFFFFF",
+                "highlight": "&H00FFFFFF", "outline": "&H55000000", "back": "&HAA000000",
+                "bold": "0", "outline_w": 2, "shadow": 1, "margin_v": 340, "box": 1,
+            },
+            "typewriter": {
+                "font": "Courier New", "size": 56, "primary": "&H00FFFFFF",
+                "highlight": "&H0000FFFF", "outline": "&H00000000", "back": "&HAA000000",
+                "bold": "-1", "outline_w": 3, "shadow": 1, "margin_v": 380, "box": 1,
+            },
+            "bubble": {
+                "font": "Arial Black", "size": 62, "primary": "&H00FFFFFF",
+                "highlight": "&H00D94E4E", "outline": "&H004ECDC4", "back": "&H99000000",
+                "bold": "-1", "outline_w": 5, "shadow": 2, "margin_v": 390, "box": 3,
+            },
+        }
+        preset = style_presets.get(self.caption_style, style_presets["capcut"])
         
         # ASS header - CapCut style: white text, yellow highlight, black outline
-        ass_content = """[Script Info]
+        ass_content = f"""[Script Info]
 Title: Auto-generated captions
 ScriptType: v4.00+
 WrapStyle: 0
@@ -3074,7 +3115,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,65,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,50,50,400,1
+Style: Default,{preset["font"]},{preset["size"]},{preset["primary"]},&H000000FF,{preset["outline"]},{preset["back"]},{preset["bold"]},0,0,0,100,100,0,0,{preset["box"]},{preset["outline_w"]},{preset["shadow"]},2,50,50,{preset["margin_v"]},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -3106,7 +3147,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         word_text = w.word.strip().upper()
                         if k == j:
                             # Highlight current word (yellow: &H00FFFF in BGR)
-                            text_parts.append(f"{{\\c&H00FFFF&}}{word_text}{{\\c&HFFFFFF&}}")
+                            text_parts.append(f"{{\\c{preset['highlight']}&}}{word_text}{{\\c{preset['primary']}&}}")
                         else:
                             text_parts.append(word_text)
                     

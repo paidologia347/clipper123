@@ -39,6 +39,7 @@ socket.on('highlights_ready', (data) => {
       job_id: data.job_id,
       session_id: data.session_id,
       highlights: data.highlights,
+      transcript: data.transcript || '',
       video_info: data.video_info,
       channel_name: data.channel_name,
     };
@@ -263,7 +264,8 @@ async function checkCookiesStatus() {
 // ── Processing ─────────────────────────────────────
 async function startProcessing() {
   const url = document.getElementById('url-input').value.trim();
-  if (!url && !selectedSourceVideo) return;
+  const externalUrl = document.getElementById('external-source-url')?.value.trim() || '';
+  if (!url && !selectedSourceVideo && !externalUrl) return;
 
   const numClips = parseInt(document.getElementById('clip-count').value) || 5;
   const subtitleLang = document.getElementById('subtitle-lang').value;
@@ -280,6 +282,17 @@ async function startProcessing() {
       formData.append('num_clips', String(numClips));
       formData.append('title', selectedSourceVideo.name.replace(/\.[^.]+$/, ''));
       resp = await fetch('/api/source/upload', {method: 'POST', body: formData});
+    } else if (externalUrl) {
+      setSourceUploadStatus('uploading', 'Importing external source video...');
+      resp = await fetch('/api/source/import', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          source_url: externalUrl,
+          title: document.getElementById('external-source-title')?.value || 'External source video',
+          num_clips: numClips,
+        }),
+      });
     } else {
       resp = await fetch('/api/process/start', {
         method: 'POST',
@@ -297,19 +310,19 @@ async function startProcessing() {
 
     if (!resp.ok || data.error) {
       const errorMessage = data.error || `HTTP ${resp.status}`;
-      if (selectedSourceVideo) setSourceUploadStatus('error', `Upload failed: ${errorMessage}`);
+      if (selectedSourceVideo || externalUrl) setSourceUploadStatus('error', `Source failed: ${errorMessage}`);
       showToast(errorMessage, 'error');
       showPage('home');
       return;
     }
 
     currentJobId = data.job_id;
-    if (selectedSourceVideo) {
-      setSourceUploadStatus('success', `Upload successful. Job ${data.job_id} is processing.`);
+    if (selectedSourceVideo || externalUrl) {
+      setSourceUploadStatus('success', `Source accepted. Job ${data.job_id} is processing.`);
     }
   } catch (e) {
     const message = e && e.message ? e.message : 'Network error';
-    if (selectedSourceVideo) setSourceUploadStatus('error', `Upload failed: ${message}`);
+    if (selectedSourceVideo || externalUrl) setSourceUploadStatus('error', `Source failed: ${message}`);
     showToast('Failed to start processing', 'error');
     showPage('home');
   }
@@ -373,7 +386,48 @@ async function cancelJob() {
 // ── Highlight Selection ────────────────────────────
 function showHighlightSelection() {
   showPage('highlights');
+  renderTranscriptEditor();
   renderHighlights();
+}
+
+function renderTranscriptEditor() {
+  const card = document.getElementById('transcript-card');
+  const editor = document.getElementById('transcript-editor');
+  if (!card || !editor || !currentSessionData) return;
+  const transcript = currentSessionData.transcript || '';
+  if (!transcript) {
+    card.style.display = 'none';
+    return;
+  }
+  editor.value = transcript;
+  card.style.display = 'block';
+}
+
+async function saveTranscript(regenerate) {
+  if (!currentSessionData?.session_id) return;
+  const transcript = document.getElementById('transcript-editor')?.value || '';
+  const numClips = parseInt(document.getElementById('clip-count').value) || highlights.length || 5;
+  try {
+    const resp = await fetch(`/api/session/${encodeURIComponent(currentSessionData.session_id)}/transcript`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({transcript, regenerate, num_clips: numClips}),
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      showToast(data.error || 'Failed to save transcript', 'error');
+      return;
+    }
+    currentSessionData.transcript = data.transcript;
+    if (regenerate) {
+      highlights = data.highlights || [];
+      currentSessionData.highlights = highlights;
+      renderHighlights();
+    }
+    showToast(regenerate ? 'Transcript saved and highlights regenerated' : 'Transcript saved', 'success');
+  } catch (e) {
+    showToast('Failed to save transcript', 'error');
+  }
 }
 
 function renderHighlights() {
@@ -470,6 +524,7 @@ async function processSelected() {
   const addCaptions = document.getElementById('toggle-captions').checked;
   const addHook = document.getElementById('toggle-hook').checked;
   const addPublishPack = document.getElementById('toggle-publish-pack').checked;
+  const captionStyle = document.getElementById('caption-style')?.value || 'capcut';
 
   showPage('clipping');
   resetClipUI();
@@ -485,6 +540,7 @@ async function processSelected() {
         add_captions: addCaptions,
         add_hook: addHook,
         add_publish_pack: addPublishPack,
+        caption_style: captionStyle,
       }),
     });
     const data = await resp.json();
