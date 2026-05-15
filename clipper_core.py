@@ -98,32 +98,37 @@ class AutoClipperCore:
     ):
         # Multi-provider support
         self.ai_providers = ai_providers or {}
-        
+
+        def _make_client(cfg: dict, default_base: str = "https://api.openai.com/v1", **kwargs):
+            """Build an OpenAI-compatible client only if an api_key is available.
+
+            Falls back to OPENAI_API_KEY env var when the config api_key is empty so
+            HF Space / system secrets work without forcing the user to retype the key
+            in every per-provider form field. Returns ``client`` (legacy single
+            client) when nothing is configured, so call sites stay backward
+            compatible.
+            """
+            api_key = (cfg.get("api_key") or "").strip() or os.environ.get("OPENAI_API_KEY", "").strip()
+            base_url = cfg.get("base_url") or default_base
+            if not api_key:
+                return client
+            return OpenAI(api_key=api_key, base_url=base_url, **kwargs)
+
         # Create separate clients for each provider
         if self.ai_providers:
             # Highlight Finder client
             hf_config = self.ai_providers.get("highlight_finder", {})
-            self.highlight_client = OpenAI(
-                api_key=hf_config.get("api_key", ""),
-                base_url=hf_config.get("base_url", "https://api.openai.com/v1")
-            )
+            self.highlight_client = _make_client(hf_config)
             self.model = hf_config.get("model", model)
-            
+
             # Caption Maker client (Whisper) — use longer timeout for large audio uploads
             cm_config = self.ai_providers.get("caption_maker", {})
-            self.caption_client = OpenAI(
-                api_key=cm_config.get("api_key", ""),
-                base_url=cm_config.get("base_url", "https://api.openai.com/v1"),
-                timeout=600.0  # 10 minutes for large audio files
-            )
+            self.caption_client = _make_client(cm_config, timeout=600.0)
             self.whisper_model = cm_config.get("model", "whisper-1")
-            
+
             # Hook Maker client (TTS)
             hm_config = self.ai_providers.get("hook_maker", {})
-            self.tts_client = OpenAI(
-                api_key=hm_config.get("api_key", ""),
-                base_url=hm_config.get("base_url", "https://api.openai.com/v1")
-            )
+            self.tts_client = _make_client(hm_config)
             self.tts_model = hm_config.get("model", tts_model)
         else:
             # Fallback to single client (backward compatibility)
@@ -136,7 +141,10 @@ class AutoClipperCore:
         
         # Keep original client for backward compatibility
         self.client = client
-        
+
+        # Misc runtime config bag (consumed by yt-dlp proxy override etc.)
+        self.config = {}
+
         self.ffmpeg_path = ffmpeg_path
         self.ytdlp_path = ytdlp_path
         self.output_dir = Path(output_dir)
