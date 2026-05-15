@@ -53,19 +53,19 @@ socket.on('clip_progress', (data) => {
 socket.on('clip_item_progress', (data) => {
   if (data.job_id === currentJobId) {
     const el = document.getElementById('clip-current');
-    if (el) el.textContent = `Clip ${data.current}/${data.total}: ${data.title}`;
+    if (el) el.textContent = `Klip ${data.current}/${data.total}: ${data.title}`;
     const ct = document.getElementById('clip-count-text');
-    if (ct) ct.textContent = `${data.current} / ${data.total} clips processed`;
+    if (ct) ct.textContent = `${data.current} / ${data.total} klip diproses`;
   }
 });
 
 socket.on('clipping_complete', (data) => {
   if (data.job_id === currentJobId) {
-    showToast(`${data.clips_count} clips created!`, 'success');
+    showToast(`${data.clips_count} klip berhasil dibuat!`, 'success');
     document.getElementById('clip-cancel-btn').disabled = true;
     document.getElementById('clip-back-btn').disabled = false;
     document.getElementById('clip-sessions-btn').disabled = false;
-    document.getElementById('clip-status').textContent = 'All clips created!';
+    document.getElementById('clip-status').textContent = 'Semua klip selesai dibuat!';
     document.getElementById('clip-progress').style.width = '100%';
   }
 });
@@ -113,7 +113,7 @@ function onUrlChange() {
 
   if (!url) {
     document.getElementById('thumbnail-preview').innerHTML =
-      '<div class="placeholder"><div style="font-size:36px; margin-bottom:8px">🎬</div><div>Paste a YouTube URL to see preview</div></div>';
+      '<div class="placeholder"><div style="font-size:36px; margin-bottom:8px">🎬</div><div>Tempel link YouTube untuk melihat preview</div></div>';
     document.getElementById('video-title').textContent = '';
     document.getElementById('start-btn').disabled = !selectedSourceVideo;
     return;
@@ -160,7 +160,7 @@ function onSourceVideoSelected(input) {
   nameEl.textContent = `${file.name} (${Math.round(file.size / 1024 / 1024)} MB)`;
   document.getElementById('start-btn').disabled = false;
   document.getElementById('thumbnail-preview').innerHTML =
-    '<div class="placeholder"><div style="font-size:36px; margin-bottom:8px">🎞</div><div>Uploaded video selected</div></div>';
+    '<div class="placeholder"><div style="font-size:36px; margin-bottom:8px">🎞</div><div>Video yang di-upload dipilih</div></div>';
   document.getElementById('video-title').textContent = file.name;
 }
 
@@ -180,7 +180,7 @@ async function fetchVideoInfo(url) {
 
     if (data.thumbnail) {
       document.getElementById('thumbnail-preview').innerHTML =
-        `<img src="${data.thumbnail}" onerror="this.parentElement.innerHTML='<div class=placeholder>No thumbnail</div>'">`;
+        `<img src="${data.thumbnail}" onerror="this.parentElement.innerHTML='<div class=placeholder>Tidak ada thumbnail</div>'">`;
     }
 
     // Populate subtitles
@@ -209,7 +209,7 @@ async function pasteUrl() {
     document.getElementById('url-input').value = text;
     onUrlChange();
   } catch (e) {
-    showToast('Cannot access clipboard', 'error');
+    showToast('Tidak bisa mengakses clipboard', 'error');
   }
 }
 
@@ -226,11 +226,11 @@ async function uploadCookies(input) {
     const resp = await fetch('/api/cookies/upload', {method: 'POST', body: formData});
     const data = await resp.json();
     if (data.status === 'ok') {
-      showToast('Cookies uploaded!', 'success');
+      showToast('Cookies berhasil di-upload!', 'success');
       checkCookiesStatus();
     }
   } catch (e) {
-    showToast('Upload failed', 'error');
+    showToast('Upload gagal', 'error');
   }
 }
 
@@ -240,9 +240,9 @@ async function checkCookiesStatus() {
     const data = await resp.json();
     const el = document.getElementById('cookies-status');
     if (data.has_cookies) {
-      el.innerHTML = `<span class="status-dot green"></span><span>Cookies loaded (${data.count} entries)</span>`;
+      el.innerHTML = `<span class="status-dot green"></span><span>Cookies aktif (${data.count} entri)</span>`;
     } else {
-      el.innerHTML = '<span class="status-dot red"></span><span>No cookies</span>';
+      el.innerHTML = '<span class="status-dot red"></span><span>Belum ada cookies</span>';
     }
   } catch (e) {}
 }
@@ -284,14 +284,14 @@ async function startProcessing() {
 
     currentJobId = data.job_id;
   } catch (e) {
-    showToast('Failed to start processing', 'error');
+    showToast('Gagal memulai proses', 'error');
     showPage('home');
   }
 }
 
 function resetProcessingUI() {
   document.getElementById('processing-progress').style.width = '0%';
-  document.getElementById('processing-status').textContent = 'Initializing...';
+  document.getElementById('processing-status').textContent = 'Memulai...';
   document.getElementById('processing-log').textContent = '';
   document.getElementById('cancel-btn').disabled = false;
   document.getElementById('back-home-btn').disabled = true;
@@ -337,7 +337,7 @@ async function cancelJob() {
   if (!currentJobId) return;
   try {
     await fetch(`/api/job/${currentJobId}/cancel`, {method: 'POST'});
-    showToast('Job cancelled', 'info');
+    showToast('Pekerjaan dibatalkan', 'info');
     document.getElementById('back-home-btn').disabled = false;
     document.getElementById('clip-back-btn').disabled = false;
   } catch (e) {}
@@ -374,7 +374,7 @@ function renderHighlights() {
     div.innerHTML = `
       <input type="checkbox" checked data-idx="${i}" onchange="toggleHighlight(${i})">
       <div class="highlight-info">
-        <div class="highlight-title">${h.title || 'Untitled'}</div>
+        <div class="highlight-title">${h.title || 'Tanpa Judul'}</div>
         <div style="font-size:12px; color:var(--text-secondary); margin:4px 0;">${h.hook_text || ''}</div>
         <div class="highlight-meta">
           <span class="virality-badge ${vClass}">${vIcon} ${score}/10</span>
@@ -437,7 +437,7 @@ async function processSelected() {
   });
 
   if (selected.length === 0) {
-    showToast('Select at least one highlight', 'error');
+    showToast('Pilih minimal satu highlight', 'error');
     return;
   }
 
@@ -470,15 +470,15 @@ async function processSelected() {
 
     currentJobId = data.job_id;
   } catch (e) {
-    showToast('Failed to start clipping', 'error');
+    showToast('Gagal memulai pemotongan klip', 'error');
   }
 }
 
 function resetClipUI() {
   document.getElementById('clip-progress').style.width = '0%';
-  document.getElementById('clip-current').textContent = 'Preparing...';
-  document.getElementById('clip-count-text').textContent = '0 / 0 clips processed';
-  document.getElementById('clip-status').textContent = 'Initializing...';
+  document.getElementById('clip-current').textContent = 'Mempersiapkan...';
+  document.getElementById('clip-count-text').textContent = '0 / 0 klip diproses';
+  document.getElementById('clip-status').textContent = 'Memulai...';
   document.getElementById('clip-log').textContent = '';
   document.getElementById('clip-cancel-btn').disabled = false;
   document.getElementById('clip-back-btn').disabled = true;
@@ -494,14 +494,14 @@ function updateClipProgress(step, progress) {
 // ── Sessions/Browse ────────────────────────────────
 async function loadSessions() {
   const container = document.getElementById('sessions-list');
-  container.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading...</div></div>';
+  container.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Memuat...</div></div>';
 
   try {
     const resp = await fetch('/api/sessions');
     const sessions = await resp.json();
 
     if (!sessions.length) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📂</div><div class="empty-text">No sessions yet. Start processing a video!</div></div>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📂</div><div class="empty-text">Belum ada sesi. Mulai proses video terlebih dahulu!</div></div>';
       return;
     }
 
@@ -514,7 +514,7 @@ async function loadSessions() {
         <div class="session-header" onclick="this.nextElementSibling.classList.toggle('open')">
           <div>
             <strong>${session.name}</strong>
-            <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">${session.clips.length} clips</span>
+            <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">${session.clips.length} klip</span>
           </div>
           <span style="color:var(--text-muted)">▼</span>
         </div>
@@ -537,7 +537,7 @@ async function loadSessions() {
       container.appendChild(div);
     });
   } catch (e) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">Failed to load sessions</div></div>';
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">Gagal memuat sesi</div></div>';
   }
 }
 
@@ -567,7 +567,7 @@ function renderPublishPack(clip) {
     <div class="publish-pack">
       ${thumb}
       <div class="publish-copy">
-        <div class="publish-label">Publish Pack</div>
+        <div class="publish-label">PUBLISH PACK</div>
         <div class="publish-title">${escapeHtml(pack.title || clip.title)}</div>
         ${pack.description ? `<div class="publish-description">${escapeHtml(pack.description)}</div>` : ''}
         ${hashtags ? `<div class="publish-tags">${hashtags}</div>` : ''}
@@ -737,7 +737,7 @@ async function loadModels(prefix) {
   const apiKey = document.getElementById(prefix + '-api-key').value;
 
   if (!baseUrl) {
-    showToast('Enter a base URL first', 'error');
+    showToast('Masukkan Base URL terlebih dahulu', 'error');
     return;
   }
 
@@ -767,9 +767,9 @@ async function loadModels(prefix) {
 
     // Restore previous value if available
     if (currentVal) setSelectValue(prefix + '-model', currentVal);
-    showToast(`${data.models.length} models loaded`, 'success');
+    showToast(`${data.models.length} model dimuat`, 'success');
   } catch (e) {
-    showToast('Failed to load models', 'error');
+    showToast('Gagal memuat model', 'error');
   }
 }
 
@@ -796,7 +796,7 @@ async function validateAllKeys() {
       const data = await resp.json();
       showToast(`${mod.name}: ${data.status === 'ok' ? 'Valid' : data.message}`, data.status === 'ok' ? 'success' : 'error');
     } catch (e) {
-      showToast(`${mod.name}: Connection error`, 'error');
+      showToast(`${mod.name}: Error koneksi`, 'error');
     }
   }
 }
@@ -833,9 +833,9 @@ async function saveAiSettings() {
       body: JSON.stringify(settings),
     });
     const data = await resp.json();
-    showToast('AI settings saved!', 'success');
+    showToast('Pengaturan AI tersimpan!', 'success');
   } catch (e) {
-    showToast('Failed to save', 'error');
+    showToast('Gagal menyimpan', 'error');
   }
 }
 
@@ -859,9 +859,9 @@ async function savePerformanceSettings() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(data),
     });
-    showToast('Performance settings saved!', 'success');
+    showToast('Pengaturan performa tersimpan!', 'success');
   } catch (e) {
-    showToast('Failed to save', 'error');
+    showToast('Gagal menyimpan', 'error');
   }
 }
 
@@ -878,9 +878,9 @@ async function saveOutputSettings() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(data),
     });
-    showToast('Output settings saved!', 'success');
+    showToast('Pengaturan output tersimpan!', 'success');
   } catch (e) {
-    showToast('Failed to save', 'error');
+    showToast('Gagal menyimpan', 'error');
   }
 }
 
@@ -900,9 +900,9 @@ async function saveWatermarkSettings() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(data),
     });
-    showToast('Watermark settings saved!', 'success');
+    showToast('Pengaturan watermark tersimpan!', 'success');
   } catch (e) {
-    showToast('Failed to save', 'error');
+    showToast('Gagal menyimpan', 'error');
   }
 }
 
@@ -917,9 +917,9 @@ async function saveCreditWatermarkSettings() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(data),
     });
-    showToast('Credit watermark settings saved!', 'success');
+    showToast('Pengaturan credit watermark tersimpan!', 'success');
   } catch (e) {
-    showToast('Failed to save', 'error');
+    showToast('Gagal menyimpan', 'error');
   }
 }
 
@@ -935,10 +935,10 @@ async function uploadWatermark(input) {
     const data = await resp.json();
     if (data.path) {
       document.getElementById('wm-path').value = data.path;
-      showToast('Watermark uploaded!', 'success');
+      showToast('Watermark berhasil di-upload!', 'success');
     }
   } catch (e) {
-    showToast('Upload failed', 'error');
+    showToast('Upload gagal', 'error');
   }
 }
 
@@ -946,7 +946,7 @@ async function uploadWatermark(input) {
 // ── Status Page ────────────────────────────────────
 async function loadLibStatus() {
   const grid = document.getElementById('lib-grid');
-  grid.innerHTML = '<div class="lib-item"><div class="lib-icon">⏳</div><div class="lib-name">Loading...</div></div>';
+  grid.innerHTML = '<div class="lib-item"><div class="lib-icon">⏳</div><div class="lib-name">Memuat...</div></div>';
 
   try {
     const resp = await fetch('/api/lib/status');
@@ -968,7 +968,7 @@ async function loadLibStatus() {
         <div class="lib-icon">${info.available ? lib.icon : '❌'}</div>
         <div class="lib-name">${lib.name}</div>
         <div class="lib-version" style="color:${info.available ? 'var(--green)' : 'var(--red)'}">
-          ${info.available ? (info.version || 'Available') : 'Not found'}
+          ${info.available ? (info.version || 'Tersedia') : 'Tidak ditemukan'}
         </div>
       `;
       grid.appendChild(div);
@@ -978,11 +978,11 @@ async function loadLibStatus() {
     const homeStatus = document.getElementById('home-lib-status');
     const allOk = data.ffmpeg?.available && data.ytdlp?.available;
     homeStatus.innerHTML = allOk
-      ? '<span style="color:var(--green)">Libraries: Ready</span>'
-      : '<span style="color:var(--red)">Some libraries missing. <a href="#" onclick="showPage(\'status\'); return false;" style="color:var(--accent)">Check status</a></span>';
+      ? '<span style="color:var(--green)">Library: Siap</span>'
+      : '<span style="color:var(--red)">Sebagian library belum tersedia. <a href="#" onclick="showPage(\'status\'); return false;" style="color:var(--accent)">Cek status</a></span>';
 
   } catch (e) {
-    grid.innerHTML = '<div class="lib-item"><div class="lib-icon">⚠️</div><div class="lib-name">Error loading</div></div>';
+    grid.innerHTML = '<div class="lib-item"><div class="lib-icon">⚠️</div><div class="lib-name">Gagal memuat</div></div>';
   }
 }
 
@@ -990,18 +990,18 @@ async function loadLibStatus() {
 // ── About / Updates ────────────────────────────────
 async function checkUpdate() {
   const el = document.getElementById('update-status');
-  el.textContent = 'Checking...';
+  el.textContent = 'Mengecek...';
 
   try {
     const resp = await fetch('/api/version/check');
     const data = await resp.json();
     if (data.update_available) {
-      el.innerHTML = `Update available: v${data.latest} <a href="${data.download_url}" target="_blank" class="btn btn-primary btn-sm" style="margin-left:8px">Download</a>`;
+      el.innerHTML = `Update tersedia: v${data.latest} <a href="${data.download_url}" target="_blank" class="btn btn-primary btn-sm" style="margin-left:8px">Download</a>`;
     } else {
-      el.textContent = 'You are on the latest version!';
+      el.textContent = 'Anda sudah memakai versi terbaru!';
     }
   } catch (e) {
-    el.textContent = 'Could not check for updates';
+    el.textContent = 'Gagal mengecek update';
   }
 }
 
