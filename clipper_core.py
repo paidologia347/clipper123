@@ -580,7 +580,7 @@ Transcript:
         else:
             self.log(f"  WARNING: FFmpeg not found - subtitle conversion disabled")
         
-        # Add cookies (required)
+        # Add cookies (OPTIONAL — cookieless strategies used as fallback)
         from utils.helpers import get_app_dir
         app_dir = get_app_dir()
         cookies_locations = [
@@ -595,58 +595,119 @@ Transcript:
                 cookies_path = loc
                 break
         
-        if not cookies_path:
-            raise Exception("cookies.txt not found!\n\nPlease upload cookies.txt file from home page.")
+        if cookies_path:
+            ydl_opts['cookiefile'] = str(cookies_path)
+            self.log(f"  Using cookies from: {cookies_path}")
+        else:
+            self.log("  No cookies.txt found — using cookieless strategy chain")
         
-        ydl_opts['cookiefile'] = str(cookies_path)
-        self.log(f"  Using cookies from: {cookies_path}")
+        # Optional proxy support (from environment or config)
+        proxy_url = os.environ.get("YTDLP_PROXY") or (self.config or {}).get("proxy_url", "")
+        if proxy_url:
+            ydl_opts['proxy'] = proxy_url
+            self.log(f"  Proxy: {proxy_url}")
         
-        # Single download attempt (no browser cookies fallback)
+        # === STRATEGY CHAIN ===
+        # If cookies are available, try once with cookies first.
+        # Then fall back through cookieless player-client strategies.
+        download_strategies = []
+        
+        if cookies_path:
+            # Strategy 1: cookies (original behavior — highest quality, most reliable)
+            download_strategies.append({
+                "name": "Cookies (authenticated)",
+                "extra_opts": {}  # cookiefile already set in base opts
+            })
+        
+        # Cookieless strategies using different YouTube player clients
+        download_strategies.extend([
+            {
+                "name": "Cookieless (mweb + tv_embedded)",
+                "extra_opts": {
+                    'extractor_args': {'youtube': {'player_client': ['mweb', 'tv_embedded']}},
+                }
+            },
+            {
+                "name": "Cookieless (ios)",
+                "extra_opts": {
+                    'extractor_args': {'youtube': {'player_client': ['ios']}},
+                }
+            },
+            {
+                "name": "Cookieless (android + web)",
+                "extra_opts": {
+                    'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+                }
+            },
+        ])
+        
+        # For cookieless strategies, remove cookiefile from opts
+        def _build_opts(base_opts, strategy):
+            """Build yt-dlp options for a specific strategy"""
+            opts = {**base_opts, **strategy['extra_opts']}
+            # If this is a cookieless strategy, remove cookiefile
+            if "Cookieless" in strategy['name'] and 'cookiefile' in opts:
+                opts = {k: v for k, v in opts.items() if k != 'cookiefile'}
+            return opts
+        
         last_error = None
-        try:
-            self.log(f"  Starting download...")
+        for i, strategy in enumerate(download_strategies, 1):
+            if self.is_cancelled():
+                raise Exception("Cancelled by user")
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # First get video info
-                self.log("  Fetching video info...")
-                info = ydl.extract_info(url, download=False)
-                
-                if info:
-                    video_info = {
-                        "title": info.get("title", ""),
-                        "description": (info.get("description", "") or "")[:2000],
-                        "channel": info.get("channel", ""),
-                    }
-                    self.log(f"  Title: {video_info['title'][:50]}...")
-                
-                # Now download
-                if self.subtitle_language and self.subtitle_language != "none":
-                    self.log(f"  Downloading video with {self.subtitle_language} subtitle...")
-                else:
-                    self.log(f"  Downloading video (no subtitle, AI transcription mode)...")
-                ydl.download([url])
+            self.log(f"  Strategy {i}/{len(download_strategies)}: {strategy['name']}...")
+            current_opts = _build_opts(ydl_opts, strategy)
             
-            self.log(f"  ✓ Download successful!")
+            try:
+                with yt_dlp.YoutubeDL(current_opts) as ydl:
+                    # First get video info
+                    self.log("  Fetching video info...")
+                    info = ydl.extract_info(url, download=False)
+                    
+                    if info:
+                        video_info = {
+                            "title": info.get("title") or "",
+                            "description": (info.get("description") or "")[:2000],
+                            "channel": info.get("channel") or "",
+                        }
+                        self.log(f"  Title: {video_info['title'][:50]}...")
+                    
+                    # Now download
+                    if self.subtitle_language and self.subtitle_language != "none":
+                        self.log(f"  Downloading video with {self.subtitle_language} subtitle...")
+                    else:
+                        self.log(f"  Downloading video (no subtitle, AI transcription mode)...")
+                    ydl.download([url])
                 
-        except Exception as e:
-            last_error = str(e)
-            self.log(f"  ✗ Failed: {last_error[:100]}")
-            
+                self.log(f"  ✓ Strategy '{strategy['name']}' succeeded!")
+                last_error = None
+                break
+                    
+            except Exception as e:
+                last_error = str(e)
+                self.log(f"  ✗ Strategy '{strategy['name']}' failed: {last_error[:100]}")
+                # Clean up partial downloads before next strategy
+                for f in self.temp_dir.glob("source.*"):
+                    try:
+                        f.unlink()
+                    except Exception:
+                        pass
+                continue
+        
+        if last_error:
             # Provide helpful error message for common issues
             if "403" in last_error or "Forbidden" in last_error:
                 raise Exception(
                     "❌ ERROR: YouTube menolak akses (HTTP 403 Forbidden)\n\n"
-                    "PENYEBAB:\n"
-                    "• Cookies sudah EXPIRED (biasanya 1-2 minggu)\n"
-                    "• Cookies tidak lengkap atau tidak valid\n"
-                    "• Browser tidak login ke YouTube saat export cookies\n\n"
+                    "Semua strategi download gagal.\n\n"
                     "SOLUSI:\n"
-                    "1. Buka youtube.com di browser\n"
-                    "2. PASTIKAN sudah LOGIN ke akun YouTube/Google\n"
-                    "3. Export cookies BARU menggunakan extension:\n"
+                    "1. Upload cookies.txt untuk akses lebih baik\n"
+                    "2. Buka youtube.com di browser, LOGIN ke akun Google\n"
+                    "3. Export cookies menggunakan extension:\n"
                     "   - Chrome/Edge: 'Get cookies.txt LOCALLY'\n"
                     "   - Firefox: 'cookies.txt'\n"
-                    "4. Upload cookies.txt yang baru di halaman Home\n\n"
+                    "4. Upload cookies.txt di halaman Home\n\n"
+                    "💡 Cookies meningkatkan keberhasilan download secara signifikan\n"
                     "📖 Lihat COOKIES.md untuk panduan lengkap"
                 )
             elif "downloaded file is empty" in last_error.lower() or "file is empty" in last_error.lower():
@@ -654,32 +715,21 @@ Transcript:
                     "❌ ERROR: File video kosong (0 bytes)\n\n"
                     "PENYEBAB:\n"
                     "• YouTube mendeteksi aktivitas BOT\n"
-                    "• Cookies tidak cukup kuat untuk akses video content\n"
-                    "• Video mungkin memiliki proteksi khusus\n\n"
+                    "• Video memiliki proteksi khusus\n\n"
                     "SOLUSI:\n"
-                    "1. Buka browser INCOGNITO/PRIVATE mode\n"
-                    "2. Buka youtube.com dan LOGIN ke akun Google\n"
-                    "3. Tonton 2-3 video LENGKAP (bukan skip)\n"
-                    "4. Buka video yang ingin di-download, tonton sebentar\n"
-                    "5. Export cookies BARU dengan extension:\n"
-                    "   - Chrome/Edge: 'Get cookies.txt LOCALLY'\n"
-                    "   - Firefox: 'cookies.txt'\n"
-                    "6. Upload cookies.txt yang baru\n\n"
-                    "💡 TIP: Gunakan akun yang aktif menonton YouTube\n"
+                    "1. Upload cookies.txt (lihat COOKIES.md)\n"
+                    "2. Atau coba video YouTube lain\n"
+                    "3. Set YTDLP_PROXY environment variable jika di server\n\n"
                     "📖 Lihat COOKIES.md untuk panduan lengkap"
                 )
             elif "Sign in to confirm" in last_error or "bot" in last_error.lower():
                 raise Exception(
-                    "❌ ERROR: YouTube meminta verifikasi bot\n\n"
-                    "PENYEBAB:\n"
-                    "• Cookies sudah tidak valid\n"
-                    "• YouTube mendeteksi aktivitas mencurigakan\n\n"
+                    "❌ ERROR: YouTube meminta verifikasi\n\n"
+                    "Video ini membutuhkan autentikasi.\n\n"
                     "SOLUSI:\n"
-                    "1. Buka youtube.com di browser INCOGNITO/PRIVATE\n"
-                    "2. Login ke akun YouTube/Google\n"
-                    "3. Tonton 1-2 video untuk 'warm up' akun\n"
-                    "4. Export cookies baru\n"
-                    "5. Upload cookies.txt yang baru\n\n"
+                    "1. Upload cookies.txt untuk akses video ini\n"
+                    "2. Buka youtube.com, login, export cookies\n"
+                    "3. Upload cookies.txt di halaman Home\n\n"
                     "📖 Lihat COOKIES.md untuk panduan lengkap"
                 )
             else:
@@ -754,9 +804,9 @@ Transcript:
             try:
                 yt_data = json.loads(result.stdout)
                 video_info = {
-                    "title": yt_data.get("title", ""),
-                    "description": yt_data.get("description", "")[:2000],
-                    "channel": yt_data.get("channel", ""),
+                    "title": yt_data.get("title") or "",
+                    "description": (yt_data.get("description") or "")[:2000],
+                    "channel": yt_data.get("channel") or "",
                 }
                 self.log(f"  Title: {video_info['title'][:50]}...")
             except json.JSONDecodeError:
@@ -769,20 +819,55 @@ Transcript:
             self.log(f"  Downloading video (no subtitle, AI transcription mode)...")
         
         # Try multiple download strategies (fallback on failure)
-        download_strategies = [
-            {
-                "name": "Browser cookies (Chrome)",
-                "extra_args": ["--cookies-from-browser", "chrome"]
-            },
-            {
-                "name": "Browser cookies (Edge)",
-                "extra_args": ["--cookies-from-browser", "edge"]
-            },
-            {
-                "name": "Simple format (no auth)",
-                "extra_args": []
-            }
+        # Strategy: cookies.txt first (if available), then cookieless with extractor-args
+        from utils.helpers import get_app_dir
+        app_dir = get_app_dir()
+        cookies_locations = [
+            Path("cookies.txt"),
+            app_dir / "cookies.txt",
         ]
+        cookies_path = None
+        for loc in cookies_locations:
+            if loc.exists():
+                cookies_path = loc
+                break
+        
+        download_strategies = []
+        
+        # If cookies.txt available, use it first (most reliable)
+        if cookies_path:
+            download_strategies.append({
+                "name": "Cookies file (authenticated)",
+                "extra_args": ["--cookies", str(cookies_path)]
+            })
+        
+        # Cookieless strategies using player-client switching
+        download_strategies.extend([
+            {
+                "name": "Cookieless (mweb + tv_embedded)",
+                "extra_args": ["--extractor-args", "youtube:player_client=mweb,tv_embedded"]
+            },
+            {
+                "name": "Cookieless (ios)",
+                "extra_args": ["--extractor-args", "youtube:player_client=ios"]
+            },
+            {
+                "name": "Cookieless (android + web)",
+                "extra_args": ["--extractor-args", "youtube:player_client=android,web"]
+            },
+        ])
+        
+        # Browser cookies as last resort (may not work on server/Docker)
+        download_strategies.append({
+            "name": "Browser cookies (Chrome)",
+            "extra_args": ["--cookies-from-browser", "chrome"]
+        })
+        
+        # Optional proxy support
+        proxy_url = os.environ.get("YTDLP_PROXY") or (self.config or {}).get("proxy_url", "")
+        proxy_args = ["--proxy", proxy_url] if proxy_url else []
+        if proxy_url:
+            self.log(f"  Proxy: {proxy_url}")
         
         # High-quality format selector with permissive fallbacks for videos
         # where YouTube exposes only limited account/region-specific formats.
@@ -800,6 +885,7 @@ Transcript:
                 "-f", format_selector,
                 "--format-sort", "res,br",
                 *base_args,
+                *proxy_args,
                 *strategy["extra_args"],
             ]
             
@@ -883,17 +969,15 @@ Transcript:
             if last_error and ("403" in last_error or "Forbidden" in last_error):
                 raise Exception(
                     "❌ ERROR: YouTube menolak akses (HTTP 403 Forbidden)\n\n"
-                    "PENYEBAB:\n"
-                    "• Cookies sudah EXPIRED (biasanya 1-2 minggu)\n"
-                    "• Cookies tidak lengkap atau tidak valid\n"
-                    "• Browser tidak login ke YouTube saat export cookies\n\n"
+                    "Semua strategi download gagal.\n\n"
                     "SOLUSI:\n"
-                    "1. Buka youtube.com di browser\n"
-                    "2. PASTIKAN sudah LOGIN ke akun YouTube/Google\n"
-                    "3. Export cookies BARU menggunakan extension:\n"
+                    "1. Upload cookies.txt untuk akses lebih baik\n"
+                    "2. Buka youtube.com di browser, LOGIN ke akun Google\n"
+                    "3. Export cookies menggunakan extension:\n"
                     "   - Chrome/Edge: 'Get cookies.txt LOCALLY'\n"
                     "   - Firefox: 'cookies.txt'\n"
-                    "4. Upload cookies.txt yang baru di halaman Home\n\n"
+                    "4. Upload cookies.txt di halaman Home\n\n"
+                    "💡 Cookies meningkatkan keberhasilan download\n"
                     "📖 Lihat COOKIES.md untuk panduan lengkap\n\n"
                     f"Detail error:\n{last_error}"
                 )
@@ -902,33 +986,22 @@ Transcript:
                     "❌ ERROR: File video kosong (0 bytes)\n\n"
                     "PENYEBAB:\n"
                     "• YouTube mendeteksi aktivitas BOT\n"
-                    "• Cookies tidak cukup kuat untuk akses video content\n"
-                    "• Video mungkin memiliki proteksi khusus\n\n"
+                    "• Video memiliki proteksi khusus\n\n"
                     "SOLUSI:\n"
-                    "1. Buka browser INCOGNITO/PRIVATE mode\n"
-                    "2. Buka youtube.com dan LOGIN ke akun Google\n"
-                    "3. Tonton 2-3 video LENGKAP (bukan skip)\n"
-                    "4. Buka video yang ingin di-download, tonton sebentar\n"
-                    "5. Export cookies BARU dengan extension:\n"
-                    "   - Chrome/Edge: 'Get cookies.txt LOCALLY'\n"
-                    "   - Firefox: 'cookies.txt'\n"
-                    "6. Upload cookies.txt yang baru\n\n"
-                    "💡 TIP: Gunakan akun yang aktif menonton YouTube\n"
+                    "1. Upload cookies.txt (lihat COOKIES.md)\n"
+                    "2. Atau coba video YouTube lain\n"
+                    "3. Set YTDLP_PROXY environment variable jika di server\n\n"
                     "📖 Lihat COOKIES.md untuk panduan lengkap\n\n"
                     f"Detail error:\n{last_error}"
                 )
             elif last_error and ("Sign in to confirm" in last_error or "bot" in last_error.lower()):
                 raise Exception(
-                    "❌ ERROR: YouTube meminta verifikasi bot\n\n"
-                    "PENYEBAB:\n"
-                    "• Cookies sudah tidak valid\n"
-                    "• YouTube mendeteksi aktivitas mencurigakan\n\n"
+                    "❌ ERROR: YouTube meminta verifikasi\n\n"
+                    "Video ini membutuhkan autentikasi.\n\n"
                     "SOLUSI:\n"
-                    "1. Buka youtube.com di browser INCOGNITO/PRIVATE\n"
-                    "2. Login ke akun YouTube/Google\n"
-                    "3. Tonton 1-2 video untuk 'warm up' akun\n"
-                    "4. Export cookies baru\n"
-                    "5. Upload cookies.txt yang baru\n\n"
+                    "1. Upload cookies.txt untuk akses video ini\n"
+                    "2. Buka youtube.com, login, export cookies\n"
+                    "3. Upload cookies.txt di halaman Home\n\n"
                     "📖 Lihat COOKIES.md untuk panduan lengkap\n\n"
                     f"Detail error:\n{last_error}"
                 )
@@ -958,7 +1031,7 @@ Transcript:
         Args:
             url: YouTube video URL
             ytdlp_path: Path to yt-dlp executable or "yt_dlp_module" for module
-            cookies_path: Path to cookies.txt file (required)
+            cookies_path: Path to cookies.txt file (optional — cookieless strategies used if not provided)
         
         Returns:
             dict with keys:
@@ -1000,51 +1073,37 @@ Transcript:
     def _get_subtitles_module(url: str, cookies_path: str, lang_names: dict) -> dict:
         """Get subtitles using yt-dlp Python module API"""
         try:
-            # Check if cookies.txt exists
-            if not cookies_path or not Path(cookies_path).exists():
-                return {
-                    "error": "cookies.txt not found. Please upload cookies.txt file.",
-                    "subtitles": [],
-                    "automatic_captions": []
-                }
-            
-            # Validate cookies file has YouTube auth cookies
-            # Check both plain cookies (SID, HSID, etc.) and __Secure- prefixed variants
-            # Modern browsers/extensions often export only __Secure- versions
-            required_cookies = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID', 'LOGIN_INFO']
-            secure_prefixes = ['__Secure-1P', '__Secure-3P']
-            found_cookies = []
-            try:
-                with open(cookies_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    for cookie in required_cookies:
-                        # Check plain cookie name (tab-separated format)
-                        if f"\t{cookie}\t" in content or content.endswith(f"\t{cookie}"):
-                            found_cookies.append(cookie)
-                        else:
-                            # Check __Secure- prefixed variants (e.g. __Secure-3PSID)
-                            for prefix in secure_prefixes:
-                                secure_name = f"{prefix}{cookie}"
-                                if f"\t{secure_name}\t" in content or content.endswith(f"\t{secure_name}"):
-                                    found_cookies.append(secure_name)
-                                    break
-                
-                if not found_cookies:
-                    debug_log(f"Cookies file missing required auth cookies. Found: {found_cookies}")
-                    return {
-                        "error": "Invalid cookies.txt - missing YouTube authentication cookies.\n\n"
-                                 "Please export fresh cookies from your browser while logged into YouTube.\n\n"
-                                 "Required cookies: SID, HSID, SSID, APISID, SAPISID, LOGIN_INFO\n\n"
-                                 "Use a browser extension like 'Get cookies.txt LOCALLY' to export.",
-                        "subtitles": [],
-                        "automatic_captions": []
-                    }
-                debug_log(f"Found auth cookies: {found_cookies}")
-            except Exception as e:
-                debug_log(f"Error reading cookies file: {e}")
+            # Cookies are now OPTIONAL — use if available and valid
+            use_cookies = False
+            if cookies_path and Path(cookies_path).exists():
+                # Validate cookies file has YouTube auth cookies
+                required_cookies = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID', 'LOGIN_INFO']
+                secure_prefixes = ['__Secure-1P', '__Secure-3P']
+                found_cookies = []
+                try:
+                    with open(cookies_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        for cookie in required_cookies:
+                            if f"\t{cookie}\t" in content or content.endswith(f"\t{cookie}"):
+                                found_cookies.append(cookie)
+                            else:
+                                for prefix in secure_prefixes:
+                                    secure_name = f"{prefix}{cookie}"
+                                    if f"\t{secure_name}\t" in content or content.endswith(f"\t{secure_name}"):
+                                        found_cookies.append(secure_name)
+                                        break
+                    
+                    if found_cookies:
+                        use_cookies = True
+                        debug_log(f"Found auth cookies: {found_cookies}")
+                    else:
+                        debug_log(f"Cookies file missing auth cookies — will use cookieless strategy")
+                except Exception as e:
+                    debug_log(f"Error reading cookies file: {e}")
+            else:
+                debug_log("No cookies.txt — using cookieless strategy for subtitle fetch")
             
             debug_log(f"Using yt-dlp module v{yt_dlp.version.__version__}")
-            debug_log(f"Cookies path: {cookies_path} (exists: {Path(cookies_path).exists()})")
             
             # Setup Deno in PATH if available
             deno_path = get_deno_path()
@@ -1060,13 +1119,20 @@ Transcript:
                 debug_log(f"Deno path added: {deno_dir}")
             
             # yt-dlp options for fetching info only
-            # NOTE: Don't use player_client=android with cookies - it bypasses cookie auth
             ydl_opts = {
                 'skip_download': True,
-                'quiet': False,  # Show warnings for debugging
+                'quiet': False,
                 'no_warnings': False,
-                'cookiefile': str(cookies_path),  # Ensure string path
             }
+            
+            # Add cookies if available and valid
+            if use_cookies:
+                ydl_opts['cookiefile'] = str(cookies_path)
+                debug_log(f"yt-dlp opts: cookiefile={cookies_path}")
+            else:
+                # Use cookieless player clients for subtitle fetching
+                ydl_opts['extractor_args'] = {'youtube': {'player_client': ['mweb', 'tv_embedded']}}
+                debug_log("yt-dlp opts: cookieless mode (mweb + tv_embedded)")
             
             # Add Deno JS runtime if available
             if deno_path and Path(deno_path).exists():
@@ -1079,7 +1145,11 @@ Transcript:
                 ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
                 debug_log(f"FFmpeg location: {ydl_opts['ffmpeg_location']}")
             
-            debug_log(f"yt-dlp opts: cookiefile={ydl_opts['cookiefile']}")
+            # Optional proxy
+            proxy_url = os.environ.get("YTDLP_PROXY", "")
+            if proxy_url:
+                ydl_opts['proxy'] = proxy_url
+                debug_log(f"Proxy: {proxy_url}")
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 video_data = ydl.extract_info(url, download=False)
@@ -1117,14 +1187,6 @@ Transcript:
     def _get_subtitles_subprocess(url: str, ytdlp_path: str, cookies_path: str, lang_names: dict) -> dict:
         """Get subtitles using yt-dlp subprocess (fallback)"""
         try:
-            # Check if cookies.txt exists
-            if not cookies_path or not Path(cookies_path).exists():
-                return {
-                    "error": "cookies.txt not found. Please upload cookies.txt file.",
-                    "subtitles": [],
-                    "automatic_captions": []
-                }
-            
             # Setup environment with Deno path if available
             env = os.environ.copy()
             deno_path = get_deno_path()
@@ -1139,9 +1201,21 @@ Transcript:
                 debug_log("Deno not found - remote-components may not work")
             
             # Use --dump-json to get structured data
-            # NOTE: Don't use player_client=android with cookies - it bypasses cookie auth
-            cmd = [ytdlp_path, "--dump-json", "--skip-download", 
-                   "--cookies", cookies_path]
+            cmd = [ytdlp_path, "--dump-json", "--skip-download"]
+            
+            # Cookies are OPTIONAL — use if available
+            if cookies_path and Path(cookies_path).exists():
+                cmd.extend(["--cookies", cookies_path])
+                debug_log(f"Using cookies: {cookies_path}")
+            else:
+                # Cookieless: use player_client switching
+                cmd.extend(["--extractor-args", "youtube:player_client=mweb,tv_embedded"])
+                debug_log("No cookies — using cookieless mode (mweb + tv_embedded)")
+            
+            # Optional proxy
+            proxy_url = os.environ.get("YTDLP_PROXY", "")
+            if proxy_url:
+                cmd.extend(["--proxy", proxy_url])
             
             # Check for remote-components support (requires Deno)
             try:
