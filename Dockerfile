@@ -14,7 +14,15 @@ RUN apt-get update \
         ffmpeg \
         libglib2.0-0 \
         libgl1 \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Deno (required by yt-dlp for JS runtime / remote components)
+RUN curl -fsSL https://github.com/denoland/deno/releases/download/v2.6.7/deno-x86_64-unknown-linux-gnu.zip \
+        -o /tmp/deno.zip \
+    && unzip /tmp/deno.zip -d /usr/local/bin/ \
+    && chmod +x /usr/local/bin/deno \
+    && rm /tmp/deno.zip
 
 COPY requirements.txt requirements_web.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
