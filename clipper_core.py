@@ -91,6 +91,8 @@ class AutoClipperCore:
         mediapipe_settings: dict = None,
         ai_providers: dict = None,
         subtitle_language: str = "id",
+        min_clip_duration: int = 58,
+        max_clip_duration: int = 120,
         log_callback=None,
         progress_callback=None,
         token_callback=None,
@@ -161,6 +163,17 @@ class AutoClipperCore:
             "center_weight": 0.3
         }
         self.subtitle_language = subtitle_language
+        # Highlight duration bounds (seconds). Configurable via Pengaturan → Output.
+        # Default 58/120 keeps backward compatibility with the original hard-coded
+        # 58<= duration <=120 filter.
+        try:
+            self.min_clip_duration = max(1, int(min_clip_duration))
+        except (TypeError, ValueError):
+            self.min_clip_duration = 58
+        try:
+            self.max_clip_duration = max(self.min_clip_duration + 1, int(max_clip_duration))
+        except (TypeError, ValueError):
+            self.max_clip_duration = 120
         self.log = log_callback or print
         self.set_progress = progress_callback or (lambda s, p: None)
         self.report_tokens = token_callback or (lambda gi, go, w, t: None)
@@ -301,15 +314,18 @@ Jika harus memilih, utamakan EMOSI & KONFLIK dibanding edukasi netral.
 ATURAN DURASI (KRITIS – TIDAK BOLEH DILANGGAR)
 ==============================================
 
-* Setiap clip HARUS 60–120 detik.
-* Target ideal: 85–95 detik.
+* Setiap clip HARUS {min_clip_duration}–{max_clip_duration} detik.
+* Target ideal: di tengah-tengah rentang itu.
 * Hitung durasi dari timestamp transcript.
 * JANGAN estimasi berdasarkan panjang teks.
 
-Jika durasi < 60 detik:
-→ PERPANJANG dengan konteks sebelum atau sesudahnya.
+Jika satu momen < {min_clip_duration} detik:
+→ WAJIB GABUNGKAN dengan momen sebelum/sesudahnya yang masih satu topik,
+  ATAU tambahkan setup/payoff context, sampai durasi >= {min_clip_duration} detik.
+→ JANGAN mengembalikan clip < {min_clip_duration} detik. Lebih baik gabungkan beberapa
+  momen pendek menjadi satu highlight koheren ber-narrative arc.
 
-Jika durasi > 120 detik:
+Jika durasi > {max_clip_duration} detik:
 → Pangkas bagian yang tidak relevan TANPA merusak alur cerita.
 
 ==================================================
@@ -318,14 +334,20 @@ STRATEGI WAJIB JIKA SEGMENT IDEAL TIDAK ADA
 
 Lakukan salah satu atau kombinasi berikut:
 
-1. Gabungkan beberapa bagian berurutan yang masih satu topik.
+1. Gabungkan beberapa bagian berurutan yang masih satu topik / mood / story-line.
 2. Tambahkan setup sebelum punchline agar dramatis.
 3. Tambahkan payoff setelah cerita agar terasa lengkap.
-4. Pangkas filler tapi jaga minimal 60 detik.
+4. Pangkas filler tapi jaga minimal {min_clip_duration} detik.
+
+Contoh penggabungan (PENTING):
+Bila ada 3 momen pendek berurutan 12s + 9s + 15s yang masih membahas tema sama,
+GABUNGKAN menjadi 1 clip dengan start_time = mulai momen-1, end_time = akhir momen-3
+(total ~36s + tambahkan setup/konteks supaya >= {min_clip_duration} detik).
+JANGAN hasilkan 3 clip pendek terpisah.
 
 DILARANG:
 
-* Menghasilkan clip < 60 detik
+* Menghasilkan clip < {min_clip_duration} detik
 * Mengurangi jumlah clip
 * Mengabaikan timestamp asli
 * Mengarang timestamp
@@ -414,7 +436,7 @@ SELF-VALIDATION (WAJIB SEBELUM RETURN)
 Periksa:
 
 1. Jumlah segment = {num_clips} ?
-2. Semua durasi 60–120 detik ?
+2. Semua durasi {min_clip_duration}–{max_clip_duration} detik ?
 3. Semua punya tepat 6 field ?
 4. virality_score berupa integer 1–10 ?
 5. Tidak ada field lain ?
@@ -1330,13 +1352,18 @@ Transcript:
         """
         self.log("[AI Transcription] Transcribing full video with Whisper API...")
         
-        # Check Caption Maker is configured
+        # Check Caption Maker is configured. Honor env-var fallback so that users
+        # who keep their key only in a host secret (e.g. HF Space OPENAI_API_KEY)
+        # are not blocked here even though _make_client would have built a client
+        # for them. Mirrors the fallback logic in _make_client at __init__.
         cm_config = self.ai_providers.get("caption_maker", {})
-        if not cm_config.get("api_key"):
+        cm_key = (cm_config.get("api_key") or "").strip() or os.environ.get("OPENAI_API_KEY", "").strip()
+        if not cm_key:
             raise Exception(
                 "Caption Maker is not configured!\n\n"
                 "Please set up Caption Maker in:\n"
-                "Settings → AI API Settings → Caption Maker"
+                "Settings → AI API Settings → Caption Maker\n"
+                "(or set OPENAI_API_KEY in the environment)"
             )
         
         # Extract audio as compressed mp3 to minimize file size
@@ -1679,6 +1706,8 @@ Transcript:
         prompt = self.system_prompt.replace("{num_clips}", str(request_clips))
         prompt = prompt.replace("{video_context}", video_context)
         prompt = prompt.replace("{transcript}", transcript)
+        prompt = prompt.replace("{min_clip_duration}", str(getattr(self, "min_clip_duration", 58)))
+        prompt = prompt.replace("{max_clip_duration}", str(getattr(self, "max_clip_duration", 120)))
         
         # Warn if required placeholders are missing
         if "{transcript}" in self.system_prompt and "{transcript}" in prompt:
@@ -1764,7 +1793,13 @@ Transcript:
             self.log(f"\n💡 Error position: line {e.lineno}, column {e.colno}")
             raise Exception(f"Failed to parse GPT response as JSON: {e}\n\nFull response logged above.")
         
-        # Filter by duration (min 58s, max 120s)
+        # Filter by duration. Bounds default to the legacy 58s–120s window but
+        # are configurable via Pengaturan → Output (min_clip_duration /
+        # max_clip_duration). This lets users dial the bounds down for
+        # short-clip content (e.g. "trying weird stuff" compilations) where the
+        # AI legitimately returns shorter standalone moments.
+        min_dur = getattr(self, "min_clip_duration", 58)
+        max_dur = getattr(self, "max_clip_duration", 120)
         valid = []
         for h in highlights:
             # Fallback: convert "reason" to "description" if exists
@@ -1785,14 +1820,14 @@ Transcript:
                 h["description"] = h.get("title", "No description")
                 self.log(f"  ⚠ Missing description for '{h.get('title', 'Unknown')}', using title")
             
-            if 58 <= duration <= 120:
+            if min_dur <= duration <= max_dur:
                 valid.append(h)
                 virality = h.get("virality_score", 5)
                 self.log(f"  ✓ {h['title']} ({duration:.0f}s) [🔥 {virality}/10]")
-            elif duration > 120:
-                self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too long, skipped")
-            elif duration < 58:
-                self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too short, skipped")
+            elif duration > max_dur:
+                self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too long (max {max_dur}s), skipped")
+            elif duration < min_dur:
+                self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too short (min {min_dur}s), skipped")
             
             if len(valid) >= num_clips:
                 break
@@ -1800,8 +1835,8 @@ Transcript:
         # If we don't have enough valid clips, warn user
         if len(valid) < num_clips:
             self.log(f"\n⚠️ WARNING: Only found {len(valid)} valid clips out of {num_clips} requested!")
-            self.log(f"   AI returned many segments that were too short (< 58s).")
-            self.log(f"   Consider using a better AI model or adjusting the prompt.")
+            self.log(f"   AI returned many segments that were outside the {min_dur}s–{max_dur}s window.")
+            self.log(f"   Consider lowering Min/Max Klip in Pengaturan → Output, or adjusting the prompt.")
         
         return valid[:num_clips]
     

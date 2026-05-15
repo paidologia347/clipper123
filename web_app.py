@@ -251,6 +251,8 @@ def get_output_settings():
         "output_dir": config_manager.get("output_dir", str(OUTPUT_DIR)),
         "system_prompt": config_manager.get("system_prompt", ""),
         "temperature": config_manager.get("temperature", 1.0),
+        "min_clip_duration": config_manager.get("min_clip_duration", 58),
+        "max_clip_duration": config_manager.get("max_clip_duration", 120),
     })
 
 
@@ -260,6 +262,20 @@ def save_output_settings():
     for k in ("output_dir", "system_prompt", "temperature"):
         if k in data:
             config_manager.config[k] = data[k]
+    # Clip duration bounds: coerce + sanity-clamp so a typo in the UI cannot
+    # produce an impossible window (e.g. min > max).
+    if "min_clip_duration" in data:
+        try:
+            config_manager.config["min_clip_duration"] = max(1, int(data["min_clip_duration"]))
+        except (TypeError, ValueError):
+            pass
+    if "max_clip_duration" in data:
+        try:
+            max_v = int(data["max_clip_duration"])
+            min_v = int(config_manager.config.get("min_clip_duration", 58))
+            config_manager.config["max_clip_duration"] = max(min_v + 1, max_v)
+        except (TypeError, ValueError):
+            pass
     config_manager.save()
     return jsonify({"status": "saved"})
 
@@ -485,6 +501,8 @@ def _run_find_highlights(job_id, url, num_clips, subtitle_lang):
             mediapipe_settings=cfg.get("mediapipe_settings"),
             ai_providers=ai_providers,
             subtitle_language=subtitle_lang,
+            min_clip_duration=cfg.get("min_clip_duration", 58),
+            max_clip_duration=cfg.get("max_clip_duration", 120),
             log_callback=log_cb,
             progress_callback=progress_cb,
         )
@@ -603,6 +621,8 @@ def _run_find_highlights_from_upload(job_id, video_path, num_clips, title):
             mediapipe_settings=cfg.get("mediapipe_settings"),
             ai_providers=ai_providers,
             subtitle_language="id",
+            min_clip_duration=cfg.get("min_clip_duration", 58),
+            max_clip_duration=cfg.get("max_clip_duration", 120),
             log_callback=log_cb,
             progress_callback=progress_cb,
         )
@@ -762,6 +782,8 @@ def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook
             face_tracking_mode=cfg.get("face_tracking_mode", "opencv"),
             mediapipe_settings=cfg.get("mediapipe_settings"),
             ai_providers=ai_providers,
+            min_clip_duration=cfg.get("min_clip_duration", 58),
+            max_clip_duration=cfg.get("max_clip_duration", 120),
             log_callback=log_cb,
             progress_callback=progress_cb,
         )
