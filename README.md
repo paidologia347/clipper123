@@ -1,7 +1,7 @@
 ---
 title: Cliper 123
 emoji: 🎬
-colorFrom: emerald
+colorFrom: green
 colorTo: indigo
 sdk: docker
 app_port: 7860
