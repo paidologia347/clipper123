@@ -1,12 +1,12 @@
 ---
-title: YT Short Clipper
+title: Cliper 123
 emoji: 🎬
-colorFrom: blue
+colorFrom: emerald
 colorTo: indigo
 sdk: docker
 app_port: 7860
 pinned: false
-short_description: Web UI for clipping long YouTube videos into short-form clips.
+short_description: AI YouTube clipping dashboard (Cliper 123).
 ---
 
 # YT-Short-Clipper
