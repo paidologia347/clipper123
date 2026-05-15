@@ -648,6 +648,8 @@ async function loadSettingsData() {
     document.getElementById('output-dir').value = data.output_dir || '';
     document.getElementById('system-prompt').value = data.system_prompt || '';
     document.getElementById('temperature').value = data.temperature || 1.0;
+    document.getElementById('min-clip-duration').value = data.min_clip_duration ?? 58;
+    document.getElementById('max-clip-duration').value = data.max_clip_duration ?? 120;
   } catch (e) {}
 
   // Load watermark settings
@@ -866,10 +868,18 @@ async function savePerformanceSettings() {
 }
 
 async function saveOutputSettings() {
+  const minDur = parseInt(document.getElementById('min-clip-duration').value, 10);
+  const maxDur = parseInt(document.getElementById('max-clip-duration').value, 10);
+  if (Number.isFinite(minDur) && Number.isFinite(maxDur) && minDur >= maxDur) {
+    showToast('Min durasi klip harus lebih kecil dari Max', 'error');
+    return;
+  }
   const data = {
     output_dir: document.getElementById('output-dir').value,
     system_prompt: document.getElementById('system-prompt').value,
     temperature: parseFloat(document.getElementById('temperature').value),
+    min_clip_duration: Number.isFinite(minDur) ? minDur : 58,
+    max_clip_duration: Number.isFinite(maxDur) ? maxDur : 120,
   };
 
   try {
