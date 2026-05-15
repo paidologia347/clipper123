@@ -865,6 +865,111 @@ def cancel_job(job_id):
     return jsonify({"status": "cancelled"})
 
 
+@app.route("/api/jobs", methods=["GET"])
+def list_jobs():
+    """List all jobs with their current status"""
+    jobs = []
+    for jid, info in active_jobs.items():
+        thread = info.get("thread")
+        is_alive = thread.is_alive() if thread else False
+        jobs.append({
+            "job_id": jid,
+            "type": info.get("type"),
+            "status": info.get("status"),
+            "error": info.get("error"),
+            "url": info.get("url"),
+            "running": is_alive,
+        })
+    return jsonify({"jobs": jobs, "total": len(jobs)})
+
+
+# ════════════════════════════════════════════════════════════════════
+#  API – Publish Queue
+# ════════════════════════════════════════════════════════════════════
+
+publish_queue = []  # in-memory publish queue
+
+
+@app.route("/api/publish/queue", methods=["GET"])
+def get_publish_queue():
+    """Get the current publish queue"""
+    return jsonify({"queue": publish_queue, "total": len(publish_queue)})
+
+
+@app.route("/api/publish/queue", methods=["POST"])
+def add_to_publish_queue():
+    """Add a clip to the publish queue"""
+    data = request.json or {}
+    clip_path = data.get("clip_path", "")
+    platform = data.get("platform", "")
+    title = data.get("title", "")
+
+    if not clip_path:
+        return jsonify({"error": "clip_path is required"}), 400
+
+    if not Path(clip_path).exists():
+        return jsonify({"error": "Clip file not found"}), 404
+
+    entry = {
+        "id": str(uuid.uuid4())[:8],
+        "clip_path": clip_path,
+        "platform": platform,
+        "title": title,
+        "status": "queued",
+        "added_at": datetime.now().isoformat(),
+    }
+    publish_queue.append(entry)
+    return jsonify({"status": "added", "entry": entry})
+
+
+@app.route("/api/publish/queue/<entry_id>", methods=["DELETE"])
+def remove_from_publish_queue(entry_id):
+    """Remove an entry from the publish queue"""
+    global publish_queue
+    before = len(publish_queue)
+    publish_queue = [e for e in publish_queue if e["id"] != entry_id]
+    if len(publish_queue) == before:
+        return jsonify({"error": "Entry not found"}), 404
+    return jsonify({"status": "removed"})
+
+
+# ════════════════════════════════════════════════════════════════════
+#  API – Storage Status
+# ════════════════════════════════════════════════════════════════════
+
+@app.route("/api/storage/status", methods=["GET"])
+def storage_status():
+    """Get storage usage information"""
+    output_dir = Path(config_manager.get("output_dir", str(OUTPUT_DIR)))
+
+    total_size = 0
+    file_count = 0
+    session_count = 0
+
+    if output_dir.exists():
+        for d in output_dir.iterdir():
+            if d.is_dir() and not d.name.startswith("_"):
+                session_count += 1
+        for f in output_dir.rglob("*"):
+            if f.is_file():
+                total_size += f.stat().st_size
+                file_count += 1
+
+    # Disk usage via shutil
+    disk = shutil.disk_usage(str(output_dir) if output_dir.exists() else "/")
+
+    return jsonify({
+        "output_dir": str(output_dir),
+        "total_size_bytes": total_size,
+        "total_size_mb": round(total_size / (1024 * 1024), 2),
+        "file_count": file_count,
+        "session_count": session_count,
+        "disk_total_gb": round(disk.total / (1024 ** 3), 2),
+        "disk_used_gb": round(disk.used / (1024 ** 3), 2),
+        "disk_free_gb": round(disk.free / (1024 ** 3), 2),
+    })
+
+
 # ════════════════════════════════════════════════════════════════════
 #  API – Sessions & Results (Browse)
 # ════════════════════════════════════════════════════════════════════
