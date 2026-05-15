@@ -132,13 +132,49 @@ def get_deno_path():
 
 
 def extract_video_id(url: str) -> str:
-    """Extract YouTube video ID from URL"""
-    patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
-        r'(?:youtu\.be\/)([0-9A-Za-z_-]{11})'
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    return None
+    """Extract YouTube video ID from URL
+    
+    Validates that the URL is from a known YouTube domain and extracts
+    the 11-character video ID. Returns None for non-YouTube URLs.
+    """
+    if not url:
+        return None
+    
+    url = url.strip()
+    
+    try:
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+    except Exception:
+        return None
+    
+    # Validate YouTube domain
+    host = (parsed.hostname or "").lower()
+    yt_hosts = {"youtube.com", "www.youtube.com", "m.youtube.com", 
+                "music.youtube.com", "youtu.be"}
+    
+    if host not in yt_hosts:
+        return None
+    
+    video_id = None
+    
+    # youtu.be/<id>
+    if host == "youtu.be":
+        path_part = parsed.path.lstrip("/").split("/")[0] if parsed.path else ""
+        if re.match(r'^[0-9A-Za-z_-]{11}$', path_part):
+            video_id = path_part
+    else:
+        # /watch?v=<id>
+        if parsed.path in ("/watch", "/watch/"):
+            params = parse_qs(parsed.query)
+            v = params.get("v", [None])[0]
+            if v and re.match(r'^[0-9A-Za-z_-]{11}$', v):
+                video_id = v
+        else:
+            # /shorts/<id>, /embed/<id>, /live/<id>, /v/<id>
+            parts = parsed.path.strip("/").split("/")
+            if len(parts) >= 2 and parts[0] in ("shorts", "embed", "live", "v"):
+                if re.match(r'^[0-9A-Za-z_-]{11}$', parts[1]):
+                    video_id = parts[1]
+    
+    return video_id

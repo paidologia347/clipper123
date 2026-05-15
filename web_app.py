@@ -317,9 +317,17 @@ def get_video_info():
             "extract_flat": False,
             "skip_download": True,
         }
-        # Add cookies if available
+        # Add cookies if available, otherwise use cookieless player clients
         if COOKIES_FILE.exists():
             ydl_opts["cookiefile"] = str(COOKIES_FILE)
+        else:
+            # Cookieless mode: use player_client switching
+            ydl_opts["extractor_args"] = {"youtube": {"player_client": ["mweb", "tv_embedded"]}}
+        
+        # Optional proxy support
+        proxy_url = os.environ.get("YTDLP_PROXY", "")
+        if proxy_url:
+            ydl_opts["proxy"] = proxy_url
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
