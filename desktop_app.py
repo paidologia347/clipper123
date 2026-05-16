@@ -1,14 +1,20 @@
 """
-YT Short Clipper - Desktop Launcher
-Runs the Flask web app locally and opens the browser automatically.
+YT Short Clipper - Desktop App (Native Window)
+Runs the Flask web app inside a pywebview native window.
+No browser required — looks and feels like a native desktop application.
 """
 
 import os
 import sys
 import socket
 import threading
-import webbrowser
 import time
+
+# Fix for PyInstaller windowed mode (console=False)
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
 
 
 def get_free_port(default=5000):
@@ -23,42 +29,54 @@ def get_free_port(default=5000):
     return default
 
 
-def open_browser(port, retries=10, delay=0.5):
-    """Wait for the server to start, then open the browser."""
-    for _ in range(retries):
+def wait_for_server(port, timeout=15):
+    """Block until the Flask server is accepting connections."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(1)
                 s.connect(("127.0.0.1", port))
-                break
+                return True
         except (ConnectionRefusedError, OSError):
-            time.sleep(delay)
-    webbrowser.open(f"http://localhost:{port}")
+            time.sleep(0.3)
+    return False
 
 
 def main():
     port = get_free_port()
     os.environ["PORT"] = str(port)
 
-    # Import after setting env so web_app picks up the port
     from web_app import app, socketio
     from version import __version__
 
-    print(f"\n  YT Short Clipper Desktop v{__version__}")
-    print(f"  Starting on http://localhost:{port}")
-    print(f"  Press Ctrl+C to quit\n")
-
-    # Open browser in a background thread once server is ready
-    threading.Thread(target=open_browser, args=(port,), daemon=True).start()
-
-    socketio.run(
-        app,
-        host="127.0.0.1",
-        port=port,
-        debug=False,
-        allow_unsafe_werkzeug=True,
-        use_reloader=False,
+    # Start Flask server in background thread
+    server_thread = threading.Thread(
+        target=lambda: socketio.run(
+            app,
+            host="127.0.0.1",
+            port=port,
+            debug=False,
+            allow_unsafe_werkzeug=True,
+            use_reloader=False,
+        ),
+        daemon=True,
     )
+    server_thread.start()
+
+    # Wait for server to be ready
+    wait_for_server(port)
+
+    # Open native window with pywebview
+    import webview
+    webview.create_window(
+        f"YT Short Clipper v{__version__}",
+        f"http://127.0.0.1:{port}",
+        width=1200,
+        height=800,
+        min_size=(900, 600),
+    )
+    webview.start()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec file for YT Short Clipper Desktop (Flask Web App)
-# Packages the web app as a standalone .exe that runs locally
+# PyInstaller spec file for YT Short Clipper Desktop (Native Window)
+# Packages the Flask web app with pywebview as a native desktop application.
+# No browser required — the app runs in its own window.
 
 import os
 import shutil
@@ -51,6 +52,7 @@ a = Analysis(
         'flask',
         'flask_socketio',
         'engineio.async_drivers.threading',
+        'webview',
         'openai',
         'cv2',
         'numpy',
@@ -74,7 +76,6 @@ a = Analysis(
         'tensorflow',
         'whisper',
         'customtkinter',
-        'webview',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -98,7 +99,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,  # Show console for server logs
+    console=False,  # No console window — native app
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
