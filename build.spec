@@ -3,6 +3,7 @@
 
 import os
 import sys
+import shutil
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
@@ -13,19 +14,23 @@ opencv_data = collect_data_files('cv2')
 # Icon path
 icon_path = 'assets/icon.ico' if os.path.exists('assets/icon.ico') else None
 
+# Auto-detect yt-dlp executable path
+_ytdlp_path = shutil.which('yt-dlp')
+_binaries = []
+if _ytdlp_path:
+    _binaries.append((_ytdlp_path, '.'))
+
+# Bundle Deno if available (required by yt-dlp for JS runtime)
+_deno_path = shutil.which('deno')
+if _deno_path:
+    _binaries.append((_deno_path, 'bin'))
+elif os.path.exists('deno.exe'):
+    _binaries.append(('deno.exe', 'bin'))
+
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[
-        # Bundle yt-dlp executable
-        (r'C:\Users\jipra\AppData\Local\Programs\Python\Python313\Scripts\yt-dlp.exe', '.'),
-        
-        # Bundle Deno executable (required for yt-dlp --remote-components)
-        # Download from: https://github.com/denoland/deno/releases
-        # Windows: deno-x86_64-pc-windows-msvc.zip
-        # Extract deno.exe and place in project root, then uncomment line below:
-        # ('deno.exe', 'bin'),
-    ],
+    binaries=_binaries,
     datas=[
         *opencv_data,
         ('assets', 'assets'),  # Bundle assets folder
