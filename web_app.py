@@ -289,8 +289,16 @@ def cookies_status():
     if COOKIES_FILE.exists():
         lines = COOKIES_FILE.read_text(errors="ignore").strip().split("\n")
         cookie_lines = [l for l in lines if l.strip() and not l.startswith("#")]
-        return jsonify({"has_cookies": True, "count": len(cookie_lines)})
-    return jsonify({"has_cookies": False, "count": 0})
+        # Also verify cookie quality
+        from utils.youtube_auth import verify_youtube_cookies
+        verification = verify_youtube_cookies(str(COOKIES_FILE))
+        return jsonify({
+            "has_cookies": True,
+            "count": len(cookie_lines),
+            "valid": verification.get("valid", False),
+            "message": verification.get("message", ""),
+        })
+    return jsonify({"has_cookies": False, "count": 0, "valid": False})
 
 
 @app.route("/api/cookies/upload", methods=["POST"])
@@ -306,6 +314,51 @@ def upload_cookies():
     f = request.files["file"]
     f.save(str(COOKIES_FILE))
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/cookies/delete", methods=["POST"])
+def delete_cookies():
+    """Delete existing cookies file"""
+    if COOKIES_FILE.exists():
+        COOKIES_FILE.unlink()
+        return jsonify({"status": "ok", "message": "Cookies berhasil dihapus"})
+    return jsonify({"status": "ok", "message": "Tidak ada cookies untuk dihapus"})
+
+
+# ════════════════════════════════════════════════════════════════════
+#  API – YouTube Browser Login (Auto Cookie Extraction)
+# ════════════════════════════════════════════════════════════════════
+
+@app.route("/api/youtube/browsers", methods=["GET"])
+def get_available_browsers():
+    """List browsers available for cookie extraction"""
+    from utils.youtube_auth import get_available_browsers as detect_browsers
+    browsers = detect_browsers()
+    return jsonify({"browsers": browsers, "count": len(browsers)})
+
+
+@app.route("/api/youtube/extract-cookies", methods=["POST"])
+def extract_browser_cookies():
+    """Extract YouTube cookies from user's browser automatically"""
+    from utils.youtube_auth import extract_cookies_from_browser, auto_extract_best_browser
+
+    data = request.json or {}
+    browser = data.get("browser")  # Optional: specific browser to use
+
+    if browser:
+        result = extract_cookies_from_browser(browser, str(COOKIES_FILE))
+    else:
+        result = auto_extract_best_browser(str(COOKIES_FILE))
+
+    return jsonify(result)
+
+
+@app.route("/api/youtube/verify-cookies", methods=["GET"])
+def verify_cookies():
+    """Verify if current cookies are valid for YouTube"""
+    from utils.youtube_auth import verify_youtube_cookies
+    result = verify_youtube_cookies(str(COOKIES_FILE))
+    return jsonify(result)
 
 
 # ════════════════════════════════════════════════════════════════════

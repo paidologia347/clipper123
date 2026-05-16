@@ -24,12 +24,21 @@ AI_PROVIDERS_CONFIG = {
     },
     "google": {
         "name": "🔵 Google Gemini",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta",
-        "description": "Google's Generative AI (Gemini models)",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "description": "Google Gemini — free tier 1500 RPD, tanpa kartu kredit",
         "default_models": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
         "api_key_format": "AIza*",
-        "docs_url": "https://aistudio.google.com/app/apikey",
-        "requires_load": False  # Known models, no need to fetch
+        "docs_url": "https://aistudio.google.com/apikey",
+        "requires_load": False
+    },
+    "nvidia_nim": {
+        "name": "🟢 NVIDIA NIM",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "description": "NVIDIA NIM — 100+ model gratis, 40 RPM, tanpa kartu kredit",
+        "default_models": ["deepseek-ai/deepseek-r1", "meta/llama-3.3-70b-instruct", "google/gemma-3-27b-it", "qwen/qwen2.5-72b-instruct"],
+        "api_key_format": "nvapi-*",
+        "docs_url": "https://build.nvidia.com",
+        "requires_load": True
     },
     "groq": {
         "name": "⚡ Groq",
@@ -111,6 +120,7 @@ SPECIALIZED_MODELS = {
         "ytclip": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "openai": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
+        "nvidia_nim": ["deepseek-ai/deepseek-r1", "meta/llama-3.3-70b-instruct", "google/gemma-3-27b-it"],
         "groq": ["mixtral-8x7b-32768", "llama2-70b-4096"],
         "anthropic": ["claude-3-5-sonnet-20241022"],
         "cohere": ["command-r-plus", "command-r"],
@@ -118,20 +128,23 @@ SPECIALIZED_MODELS = {
     },
     "caption_maker": {
         "ytclip": ["whisper-1"],
-        "openai": ["whisper-1"],  # Special case for whisper
-        "google": [],  # Gemini doesn't have whisper equivalent
-        "groq": [],
+        "openai": ["whisper-1"],
+        "google": [],
+        "nvidia_nim": [],
+        "groq": ["whisper-large-v3"],
     },
     "hook_maker": {
         "ytclip": ["tts-1-hd", "tts-1"],
-        "openai": ["tts-1-hd", "tts-1"],  # TTS models
-        "google": [],  # Gemini doesn't have TTS built-in
+        "openai": ["tts-1-hd", "tts-1"],
+        "google": [],
+        "nvidia_nim": [],
         "anthropic": [],
     },
     "youtube_title_maker": {
         "ytclip": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "openai": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
+        "nvidia_nim": ["deepseek-ai/deepseek-r1", "meta/llama-3.3-70b-instruct"],
         "groq": ["mixtral-8x7b-32768"],
         "anthropic": ["claude-3-5-sonnet-20241022"],
     }

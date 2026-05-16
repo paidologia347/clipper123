@@ -357,6 +357,7 @@ label {
 .status-dot.green { background: var(--green); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18); }
 .status-dot.red { background: var(--red); box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18); }
 .status-dot.orange { background: var(--orange); box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18); }
+.status-dot.yellow { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18); }
 
 .status-row {
   display: flex;
