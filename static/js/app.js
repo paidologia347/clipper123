@@ -972,14 +972,20 @@ async function loadLibStatus() {
 
     libs.forEach(lib => {
       const info = data[lib.key] || {};
+      const installable = ['ffmpeg', 'deno'];
       const div = document.createElement('div');
       div.className = 'lib-item';
+      let btnHtml = '';
+      if (!info.available && installable.includes(lib.key)) {
+        btnHtml = `<button class="btn btn-primary btn-sm" style="margin-top:6px;font-size:0.8em" onclick="installLib('${lib.key}', this)">Download</button>`;
+      }
       div.innerHTML = `
         <div class="lib-icon">${info.available ? lib.icon : '❌'}</div>
         <div class="lib-name">${lib.name}</div>
         <div class="lib-version" style="color:${info.available ? 'var(--green)' : 'var(--red)'}">
           ${info.available ? (info.version || 'Tersedia') : 'Tidak ditemukan'}
         </div>
+        ${btnHtml}
       `;
       grid.appendChild(div);
     });
@@ -1012,6 +1018,30 @@ async function checkUpdate() {
     }
   } catch (e) {
     el.textContent = 'Gagal mengecek update';
+  }
+}
+
+
+// ── Library Install ────────────────────────────────
+async function installLib(name, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Downloading...';
+
+  try {
+    const resp = await fetch(`/api/lib/install/${name}`, {method: 'POST'});
+    const data = await resp.json();
+    if (data.status === 'ok') {
+      showToast(`${name} berhasil diinstall!`, 'success');
+      loadLibStatus();
+    } else {
+      showToast(`Gagal install ${name}: ${data.message}`, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Download';
+    }
+  } catch (e) {
+    showToast(`Error: ${e.message}`, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Download';
   }
 }
 

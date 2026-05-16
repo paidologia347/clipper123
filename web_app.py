@@ -1103,6 +1103,34 @@ def lib_status():
     })
 
 
+@app.route("/api/lib/install/<name>", methods=["POST"])
+def lib_install(name):
+    """Download and install a library (ffmpeg, deno, yt-dlp)"""
+    from utils.dependency_manager import setup_ffmpeg, setup_deno
+    from utils.helpers import get_app_dir
+
+    app_dir = get_app_dir()
+    valid = {"ffmpeg", "deno"}
+
+    if name not in valid:
+        return jsonify({"status": "error", "message": f"Unknown library: {name}"}), 400
+
+    def do_install():
+        if name == "ffmpeg":
+            return setup_ffmpeg(app_dir)
+        elif name == "deno":
+            return setup_deno(app_dir)
+        return False
+
+    try:
+        success = do_install()
+        if success:
+            return jsonify({"status": "ok", "message": f"{name} installed successfully"})
+        return jsonify({"status": "error", "message": f"Failed to install {name}"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 # ════════════════════════════════════════════════════════════════════
 #  API – Version / About
 # ════════════════════════════════════════════════════════════════════
