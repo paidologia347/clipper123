@@ -3,6 +3,7 @@
 
 import os
 import sys
+import shutil
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
@@ -13,10 +14,19 @@ opencv_data = collect_data_files('cv2')
 # Icon path (macOS uses .icns)
 icon_path = 'assets/icon.icns' if os.path.exists('assets/icon.icns') else None
 
+# Auto-detect yt-dlp and Deno executable paths
+_binaries = []
+_ytdlp_path = shutil.which('yt-dlp')
+if _ytdlp_path:
+    _binaries.append((_ytdlp_path, '.'))
+_deno_path = shutil.which('deno')
+if _deno_path:
+    _binaries.append((_deno_path, 'bin'))
+
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[],
+    binaries=_binaries,
     datas=[
         *opencv_data,
         ('assets', 'assets'),

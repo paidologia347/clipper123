@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import shutil
 from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
@@ -8,10 +9,21 @@ opencv_data = collect_data_files('cv2')
 
 icon_path = 'assets/icon.ico' if os.path.exists('assets/icon.ico') else None
 
+# Auto-detect yt-dlp and Deno executable paths
+_binaries = []
+_ytdlp_path = shutil.which('yt-dlp')
+if _ytdlp_path:
+    _binaries.append((_ytdlp_path, '.'))
+_deno_path = shutil.which('deno')
+if _deno_path:
+    _binaries.append((_deno_path, 'bin'))
+elif os.path.exists('deno.exe'):
+    _binaries.append(('deno.exe', 'bin'))
+
 a = Analysis(
     ['webview_app.py'],
     pathex=[],
-    binaries=[],
+    binaries=_binaries,
     datas=[
         *opencv_data,
         ('assets', 'assets'),
