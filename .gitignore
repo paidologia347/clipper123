@@ -52,6 +52,7 @@ MANIFEST
 !build.spec
 !build_web.spec
 !build_macos.spec
+!build_desktop.spec
 
 # Installer logs
 pip-log.txt
