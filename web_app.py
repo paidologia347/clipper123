@@ -253,13 +253,14 @@ def get_output_settings():
         "temperature": config_manager.get("temperature", 1.0),
         "min_clip_duration": config_manager.get("min_clip_duration", 58),
         "max_clip_duration": config_manager.get("max_clip_duration", 120),
+        "layout_mode": config_manager.get("layout_mode", "portrait"),
     })
 
 
 @app.route("/api/settings/output", methods=["POST"])
 def save_output_settings():
     data = request.json
-    for k in ("output_dir", "system_prompt", "temperature"):
+    for k in ("output_dir", "system_prompt", "temperature", "layout_mode"):
         if k in data:
             config_manager.config[k] = data[k]
     # Clip duration bounds: coerce + sanity-clamp so a typo in the UI cannot
@@ -551,6 +552,7 @@ def _run_find_highlights(job_id, url, num_clips, subtitle_lang):
             watermark_settings=cfg.get("watermark", {"enabled": False}),
             credit_watermark_settings=cfg.get("credit_watermark", {"enabled": False}),
             face_tracking_mode=cfg.get("face_tracking_mode", "opencv"),
+            layout_mode=cfg.get("layout_mode", "portrait"),
             mediapipe_settings=cfg.get("mediapipe_settings"),
             ai_providers=ai_providers,
             subtitle_language=subtitle_lang,
@@ -671,6 +673,7 @@ def _run_find_highlights_from_upload(job_id, video_path, num_clips, title):
             watermark_settings=cfg.get("watermark", {"enabled": False}),
             credit_watermark_settings=cfg.get("credit_watermark", {"enabled": False}),
             face_tracking_mode=cfg.get("face_tracking_mode", "opencv"),
+            layout_mode=cfg.get("layout_mode", "portrait"),
             mediapipe_settings=cfg.get("mediapipe_settings"),
             ai_providers=ai_providers,
             subtitle_language="id",
@@ -833,6 +836,7 @@ def _run_clipping(job_id, session_data, selected_indices, add_captions, add_hook
             watermark_settings=cfg.get("watermark", {"enabled": False}),
             credit_watermark_settings=cfg.get("credit_watermark", {"enabled": False}),
             face_tracking_mode=cfg.get("face_tracking_mode", "opencv"),
+            layout_mode=cfg.get("layout_mode", "portrait"),
             mediapipe_settings=cfg.get("mediapipe_settings"),
             ai_providers=ai_providers,
             min_clip_duration=cfg.get("min_clip_duration", 58),

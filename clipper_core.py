@@ -88,6 +88,7 @@ class AutoClipperCore:
         watermark_settings: dict = None,
         credit_watermark_settings: dict = None,
         face_tracking_mode: str = "opencv",
+        layout_mode: str = "portrait",
         mediapipe_settings: dict = None,
         ai_providers: dict = None,
         subtitle_language: str = "id",
@@ -156,6 +157,7 @@ class AutoClipperCore:
         self.credit_watermark_settings = credit_watermark_settings or {"enabled": False}
         self.channel_name = ""  # Will be set after download
         self.face_tracking_mode = face_tracking_mode
+        self.layout_mode = layout_mode  # "portrait", "split_speaker", "split_gameplay"
         self.mediapipe_settings = mediapipe_settings or {
             "lip_activity_threshold": 0.15,
             "switch_threshold": 0.3,
@@ -2260,15 +2262,21 @@ Channel: {self.channel_name}
     def convert_to_portrait(self, input_path: str, output_path: str):
         """Convert landscape to 9:16 portrait with speaker tracking (router method)"""
         try:
-            if self.face_tracking_mode == "mediapipe":
+            if self.layout_mode in ("split_speaker", "split_gameplay"):
+                self.log(f"  Using Split Screen ({self.layout_mode})")
+                return self.convert_to_split_screen(input_path, output_path)
+            elif self.face_tracking_mode == "mediapipe":
                 self.log("  Using MediaPipe (Active Speaker Detection)")
                 return self.convert_to_portrait_mediapipe(input_path, output_path)
             else:
                 self.log("  Using OpenCV (Fast Mode)")
                 return self.convert_to_portrait_opencv(input_path, output_path)
         except Exception as e:
-            # Fallback to OpenCV if MediaPipe fails
-            if self.face_tracking_mode == "mediapipe":
+            if self.layout_mode in ("split_speaker", "split_gameplay"):
+                self.log(f"  ⚠ Split screen failed: {e}")
+                self.log("  Falling back to standard portrait mode...")
+                return self.convert_to_portrait_opencv(input_path, output_path)
+            elif self.face_tracking_mode == "mediapipe":
                 self.log(f"  ⚠ MediaPipe failed: {e}")
                 self.log("  Falling back to OpenCV mode...")
                 return self.convert_to_portrait_opencv(input_path, output_path)
@@ -2356,7 +2364,141 @@ Channel: {self.channel_name}
         self.log_ffmpeg_command(cmd, "Portrait Merge Audio (OpenCV)")
         subprocess.run(cmd, capture_output=True, creationflags=SUBPROCESS_FLAGS)
         os.unlink(temp_video)
-    
+
+    def convert_to_split_screen(self, input_path: str, output_path: str):
+        """Convert landscape video to 9:16 split-screen layout.
+
+        split_speaker  — top 50% wide shot, bottom 50% face close-up (podcast style)
+        split_gameplay — top 60% wide/gameplay, bottom 40% face cam close-up
+        """
+        cap = cv2.VideoCapture(input_path)
+        orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        out_w, out_h = 1080, 1920
+
+        if self.layout_mode == "split_gameplay":
+            top_ratio = 0.60
+        else:
+            top_ratio = 0.50
+        bot_ratio = 1.0 - top_ratio
+
+        top_h = int(out_h * top_ratio)
+        bot_h = out_h - top_h
+
+        face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
+
+        # First pass: detect face positions for close-up panel
+        face_positions = []
+        current_face = None
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(50, 50))
+
+            if len(faces) > 0:
+                largest = max(faces, key=lambda f: f[2] * f[3])
+                current_face = (
+                    int(largest[0] + largest[2] / 2),
+                    int(largest[1] + largest[3] / 2),
+                    int(largest[2]),
+                    int(largest[3]),
+                )
+            face_positions.append(current_face)
+
+        # Stabilize face center positions
+        face_cx_list = [fp[0] if fp else orig_w // 2 for fp in face_positions]
+        face_cy_list = [fp[1] if fp else orig_h // 2 for fp in face_positions]
+        face_cx_list = self.stabilize_positions(face_cx_list)
+        face_cy_list = self.stabilize_positions(face_cy_list)
+
+        # Second pass: render split-screen frames
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(temp_video, fourcc, fps, (out_w, out_h))
+
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            canvas = np.zeros((out_h, out_w, 3), dtype=np.uint8)
+
+            # --- Top panel: wide shot (letterbox fit) ---
+            scale = min(out_w / orig_w, top_h / orig_h)
+            new_w = int(orig_w * scale)
+            new_h = int(orig_h * scale)
+            resized_top = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+            x_off = (out_w - new_w) // 2
+            y_off = (top_h - new_h) // 2
+            canvas[y_off:y_off + new_h, x_off:x_off + new_w] = resized_top
+
+            # --- Bottom panel: face close-up ---
+            cx = face_cx_list[frame_idx] if frame_idx < len(face_cx_list) else orig_w // 2
+            cy = face_cy_list[frame_idx] if frame_idx < len(face_cy_list) else orig_h // 2
+
+            # Determine crop rectangle around face for close-up
+            face_info = face_positions[frame_idx] if frame_idx < len(face_positions) else None
+            if face_info:
+                fw, fh = face_info[2], face_info[3]
+                zoom_size = max(fw, fh) * 3
+            else:
+                zoom_size = min(orig_w, orig_h) * 0.6
+
+            crop_size = int(zoom_size)
+            crop_size = max(crop_size, 100)
+
+            # Maintain aspect ratio matching bottom panel (out_w / bot_h)
+            panel_aspect = out_w / bot_h
+            crop_w_face = crop_size
+            crop_h_face = int(crop_w_face / panel_aspect)
+            if crop_h_face > orig_h:
+                crop_h_face = orig_h
+                crop_w_face = int(crop_h_face * panel_aspect)
+
+            x1 = max(0, min(cx - crop_w_face // 2, orig_w - crop_w_face))
+            y1 = max(0, min(cy - crop_h_face // 2, orig_h - crop_h_face))
+            x2 = x1 + crop_w_face
+            y2 = y1 + crop_h_face
+
+            face_crop = frame[y1:y2, x1:x2]
+            if face_crop.size > 0:
+                face_resized = cv2.resize(face_crop, (out_w, bot_h), interpolation=cv2.INTER_LANCZOS4)
+                canvas[top_h:top_h + bot_h, 0:out_w] = face_resized
+
+            # Separator line
+            cv2.line(canvas, (0, top_h), (out_w, top_h), (40, 40, 40), 2)
+
+            out.write(canvas)
+            frame_idx += 1
+
+        cap.release()
+        out.release()
+
+        # Merge with original audio
+        encoder_args = self.get_video_encoder_args()
+        cmd = [
+            self.ffmpeg_path, "-y",
+            "-i", temp_video,
+            "-i", input_path,
+            *encoder_args,
+            "-c:a", "aac", "-b:a", "192k",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-shortest",
+            output_path
+        ]
+        self.log_ffmpeg_command(cmd, f"Split Screen Merge Audio ({self.layout_mode})")
+        subprocess.run(cmd, capture_output=True, creationflags=SUBPROCESS_FLAGS)
+        os.unlink(temp_video)
+
     def stabilize_positions(self, positions: list) -> list:
         """Stabilize crop positions - reduce jitter and sudden movements"""
         if not positions:
@@ -3156,15 +3298,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     def convert_to_portrait_with_progress(self, input_path: str, output_path: str, progress_callback):
         """Convert landscape to 9:16 portrait with speaker tracking and progress (router method)"""
         try:
-            if self.face_tracking_mode == "mediapipe":
+            if self.layout_mode in ("split_speaker", "split_gameplay"):
+                self.log(f"  Using Split Screen ({self.layout_mode})")
+                return self.convert_to_split_screen_with_progress(input_path, output_path, progress_callback)
+            elif self.face_tracking_mode == "mediapipe":
                 self.log("  Using MediaPipe (Active Speaker Detection)")
                 return self.convert_to_portrait_mediapipe_with_progress(input_path, output_path, progress_callback)
             else:
                 self.log("  Using OpenCV (Fast Mode)")
                 return self.convert_to_portrait_opencv_with_progress(input_path, output_path, progress_callback)
         except Exception as e:
-            # Fallback to OpenCV if MediaPipe fails
-            if self.face_tracking_mode == "mediapipe":
+            if self.layout_mode in ("split_speaker", "split_gameplay"):
+                self.log(f"  ⚠ Split screen failed: {e}")
+                self.log("  Falling back to standard portrait mode...")
+                return self.convert_to_portrait_opencv_with_progress(input_path, output_path, progress_callback)
+            elif self.face_tracking_mode == "mediapipe":
                 self.log(f"  ⚠ MediaPipe failed: {e}")
                 self.log("  Falling back to OpenCV mode...")
                 return self.convert_to_portrait_opencv_with_progress(input_path, output_path, progress_callback)
@@ -3385,6 +3533,136 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             print(f"[WARNING] Failed to cleanup temp video: {e}")
             sys.stdout.flush()
     
+    def convert_to_split_screen_with_progress(self, input_path: str, output_path: str, progress_callback):
+        """Split-screen layout with progress reporting."""
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            raise Exception(f"Failed to open video: {input_path}")
+
+        orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        out_w, out_h = 1080, 1920
+        if self.layout_mode == "split_gameplay":
+            top_ratio = 0.60
+        else:
+            top_ratio = 0.50
+        bot_ratio = 1.0 - top_ratio
+        top_h = int(out_h * top_ratio)
+        bot_h = out_h - top_h
+
+        face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
+
+        self.log("  Pass 1/2: Detecting faces...")
+        face_positions = []
+        current_face = None
+        fi = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(50, 50))
+            if len(faces) > 0:
+                largest = max(faces, key=lambda f: f[2] * f[3])
+                current_face = (
+                    int(largest[0] + largest[2] / 2),
+                    int(largest[1] + largest[3] / 2),
+                    int(largest[2]),
+                    int(largest[3]),
+                )
+            face_positions.append(current_face)
+            fi += 1
+            if total_frames > 0 and fi % 30 == 0:
+                progress_callback(fi / total_frames * 0.4)
+
+        face_cx_list = [fp[0] if fp else orig_w // 2 for fp in face_positions]
+        face_cy_list = [fp[1] if fp else orig_h // 2 for fp in face_positions]
+        face_cx_list = self.stabilize_positions(face_cx_list)
+        face_cy_list = self.stabilize_positions(face_cy_list)
+
+        self.log("  Pass 2/2: Rendering split-screen...")
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(temp_video, fourcc, fps, (out_w, out_h))
+
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            canvas = np.zeros((out_h, out_w, 3), dtype=np.uint8)
+
+            # Top panel: wide shot
+            scale = min(out_w / orig_w, top_h / orig_h)
+            new_w = int(orig_w * scale)
+            new_h = int(orig_h * scale)
+            resized_top = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
+            x_off = (out_w - new_w) // 2
+            y_off = (top_h - new_h) // 2
+            canvas[y_off:y_off + new_h, x_off:x_off + new_w] = resized_top
+
+            # Bottom panel: face close-up
+            cx = face_cx_list[frame_idx] if frame_idx < len(face_cx_list) else orig_w // 2
+            cy = face_cy_list[frame_idx] if frame_idx < len(face_cy_list) else orig_h // 2
+            face_info = face_positions[frame_idx] if frame_idx < len(face_positions) else None
+            if face_info:
+                fw, fh = face_info[2], face_info[3]
+                zoom_size = max(fw, fh) * 3
+            else:
+                zoom_size = min(orig_w, orig_h) * 0.6
+            crop_size = max(int(zoom_size), 100)
+
+            panel_aspect = out_w / bot_h
+            crop_w_face = crop_size
+            crop_h_face = int(crop_w_face / panel_aspect)
+            if crop_h_face > orig_h:
+                crop_h_face = orig_h
+                crop_w_face = int(crop_h_face * panel_aspect)
+
+            x1 = max(0, min(cx - crop_w_face // 2, orig_w - crop_w_face))
+            y1 = max(0, min(cy - crop_h_face // 2, orig_h - crop_h_face))
+            face_crop = frame[y1:y1 + crop_h_face, x1:x1 + crop_w_face]
+            if face_crop.size > 0:
+                face_resized = cv2.resize(face_crop, (out_w, bot_h), interpolation=cv2.INTER_LANCZOS4)
+                canvas[top_h:top_h + bot_h, 0:out_w] = face_resized
+
+            cv2.line(canvas, (0, top_h), (out_w, top_h), (40, 40, 40), 2)
+            out.write(canvas)
+            frame_idx += 1
+            if total_frames > 0 and frame_idx % 30 == 0:
+                progress_callback(0.4 + frame_idx / total_frames * 0.5)
+
+        cap.release()
+        out.release()
+
+        progress_callback(0.9)
+        self.log("  Merging audio...")
+
+        encoder_args = self.get_video_encoder_args()
+        cmd = [
+            self.ffmpeg_path, "-y",
+            "-i", temp_video,
+            "-i", input_path,
+            *encoder_args,
+            "-c:a", "aac", "-b:a", "192k",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-shortest",
+            output_path
+        ]
+        self.log_ffmpeg_command(cmd, f"Split Screen Merge ({self.layout_mode})")
+        subprocess.run(cmd, capture_output=True, creationflags=SUBPROCESS_FLAGS)
+        try:
+            os.unlink(temp_video)
+        except Exception:
+            pass
+        progress_callback(1.0)
+
     def convert_to_portrait_mediapipe_with_progress(self, input_path: str, output_path: str, progress_callback):
         """Convert landscape to 9:16 portrait with active speaker detection and progress (MediaPipe)"""
         
