@@ -304,6 +304,11 @@
           <div class="card-name">Credit</div>
           <div class="card-desc">Credit nama channel</div>
         </div>
+        <div class="setting-card" onclick="openSettingsSubpage('publish')">
+          <div class="card-icon">📤</div>
+          <div class="card-name">Publish</div>
+          <div class="card-desc">YouTube & TikTok upload</div>
+        </div>
         <div class="setting-card" onclick="openSettingsSubpage('about')">
           <div class="card-icon">ℹ️</div>
           <div class="card-name">Tentang</div>
@@ -550,6 +555,82 @@
       <button class="btn btn-primary" onclick="saveCreditWatermarkSettings()">💾 Simpan Credit</button>
     </div>
 
+    <!-- ── Publish Settings (YouTube & TikTok) ── -->
+    <div id="settings-publish" class="settings-subpage">
+      <span class="back-link" onclick="closeSettingsSubpage()">← Kembali ke Pengaturan</span>
+      <h3 style="margin-bottom:14px">📤 Auto Publish — YouTube & TikTok</h3>
+
+      <!-- YouTube Account -->
+      <div class="card">
+        <div class="card-title">🎬 YouTube</div>
+        <div id="yt-publish-status" class="status-row">
+          <span class="status-dot red"></span>
+          <span>Belum terhubung</span>
+        </div>
+        <div id="yt-channel-info" style="display:none; margin-top:8px; padding:8px 12px; background:var(--bg-card); border-radius:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <img id="yt-channel-thumb" src="" style="width:32px; height:32px; border-radius:50%;" alt="">
+            <div>
+              <div id="yt-channel-name" style="font-weight:600; font-size:13px;"></div>
+              <div id="yt-channel-subs" style="font-size:11px; color:var(--text-muted);"></div>
+            </div>
+          </div>
+        </div>
+        <p style="font-size:11px; color:var(--text-muted); margin:8px 0 4px;">
+          Memerlukan <code>client_secret.json</code> dari Google Cloud Console.<br>
+          <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Buat OAuth Client ID</a> →
+          Download JSON → Letakkan di folder aplikasi.
+        </p>
+        <div style="margin-top:8px; display:flex; gap:6px;">
+          <button id="yt-connect-btn" class="btn btn-primary btn-sm" onclick="connectYouTube()">
+            🔗 Hubungkan YouTube
+          </button>
+          <button id="yt-disconnect-btn" class="btn btn-sm" style="display:none; color:#ff6b6b; background:transparent; border:1px solid #ff6b6b40;" onclick="disconnectYouTube()">
+            ✂ Putuskan
+          </button>
+        </div>
+      </div>
+
+      <!-- TikTok Account -->
+      <div class="card">
+        <div class="card-title">🎵 TikTok</div>
+        <div id="tt-publish-status" class="status-row">
+          <span class="status-dot red"></span>
+          <span>Belum terhubung</span>
+        </div>
+        <div id="tt-user-info" style="display:none; margin-top:8px; padding:8px 12px; background:var(--bg-card); border-radius:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <img id="tt-user-avatar" src="" style="width:32px; height:32px; border-radius:50%;" alt="">
+            <div>
+              <div id="tt-user-name" style="font-weight:600; font-size:13px;"></div>
+              <div id="tt-mode-badge" style="font-size:11px; color:var(--text-muted);"></div>
+            </div>
+          </div>
+        </div>
+        <p style="font-size:11px; color:var(--text-muted); margin:8px 0 4px;">
+          Memerlukan Client Key & Client Secret dari TikTok Developer Portal.<br>
+          <a href="https://developers.tiktok.com/" target="_blank">Buat App di TikTok Developer</a>
+        </p>
+        <div class="form-group" style="margin-top:8px;">
+          <label>Client Key</label>
+          <input type="text" id="tt-client-key" placeholder="Client Key dari TikTok Developer">
+        </div>
+        <div class="form-group">
+          <label>Client Secret</label>
+          <input type="password" id="tt-client-secret" placeholder="Client Secret">
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-secondary btn-sm" onclick="saveTikTokConfig()">💾 Simpan Credentials</button>
+          <button id="tt-connect-btn" class="btn btn-primary btn-sm" onclick="connectTikTok()">
+            🔗 Hubungkan TikTok
+          </button>
+          <button id="tt-disconnect-btn" class="btn btn-sm" style="display:none; color:#ff6b6b; background:transparent; border:1px solid #ff6b6b40;" onclick="disconnectTikTok()">
+            ✂ Putuskan
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── About ── -->
     <div id="settings-about" class="settings-subpage">
       <span class="back-link" onclick="closeSettingsSubpage()">← Kembali ke Pengaturan</span>
@@ -602,6 +683,79 @@
       <button class="modal-close" onclick="closeVideoModal()">&times;</button>
     </div>
     <video id="modal-video" controls></video>
+  </div>
+</div>
+
+<!-- ═══ PUBLISH MODAL ═══ -->
+<div class="modal-overlay" id="publish-modal" onclick="closePublishModal(event)">
+  <div class="modal-content" style="max-width:500px;" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="publish-modal-title">📤 Upload Video</h3>
+      <button class="modal-close" onclick="closePublishModal()">&times;</button>
+    </div>
+    <div style="padding:16px;">
+      <!-- Platform selector -->
+      <div class="form-group">
+        <label>Platform</label>
+        <select id="pub-platform" onchange="onPublishPlatformChange()">
+          <option value="youtube">🎬 YouTube</option>
+          <option value="tiktok">🎵 TikTok</option>
+        </select>
+      </div>
+
+      <!-- Title -->
+      <div class="form-group">
+        <label>Judul / Caption</label>
+        <input type="text" id="pub-title" placeholder="Judul video..." maxlength="100">
+        <span id="pub-title-count" style="font-size:11px; color:var(--text-muted);">0/100</span>
+      </div>
+
+      <!-- Description (YouTube only) -->
+      <div id="pub-desc-group" class="form-group">
+        <label>Deskripsi</label>
+        <textarea id="pub-description" rows="4" placeholder="Deskripsi video..." maxlength="5000"></textarea>
+      </div>
+
+      <!-- Tags (YouTube only) -->
+      <div id="pub-tags-group" class="form-group">
+        <label>Tags (pisahkan dengan koma)</label>
+        <input type="text" id="pub-tags" placeholder="shorts, viral, fyp, indonesia">
+      </div>
+
+      <!-- Privacy -->
+      <div class="form-group">
+        <label>Privasi</label>
+        <select id="pub-privacy">
+          <option value="private">Private</option>
+          <option value="unlisted">Unlisted</option>
+          <option value="public">Public</option>
+        </select>
+      </div>
+
+      <!-- AI SEO Button (YouTube) -->
+      <div id="pub-seo-group" style="margin-bottom:12px;">
+        <button class="btn btn-secondary btn-sm" onclick="generateSeoMetadata()">
+          🤖 Generate SEO dengan AI
+        </button>
+      </div>
+
+      <!-- Hidden video path -->
+      <input type="hidden" id="pub-video-path">
+      <input type="hidden" id="pub-hook-text">
+
+      <!-- Progress -->
+      <div id="pub-progress-section" style="display:none; margin-bottom:12px;">
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" id="pub-progress-bar" style="width:0%"></div>
+        </div>
+        <div id="pub-progress-text" style="font-size:12px; color:var(--text-muted); text-align:center; margin-top:4px;">Uploading...</div>
+      </div>
+
+      <!-- Upload button -->
+      <button class="btn btn-primary btn-block" id="pub-upload-btn" onclick="doPublishUpload()">
+        📤 Upload Sekarang
+      </button>
+    </div>
   </div>
 </div>
 

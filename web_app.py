@@ -1235,6 +1235,343 @@ def upload_watermark():
 
 
 # ════════════════════════════════════════════════════════════════════
+#  API – Auto Publish (YouTube & TikTok)
+# ════════════════════════════════════════════════════════════════════
+
+# ── YouTube Publish ──────────────────────────────────────────────────
+
+_yt_uploader = None  # lazy-loaded YouTubeUploader instance
+
+
+def _get_yt_uploader():
+    """Get or create YouTubeUploader instance"""
+    global _yt_uploader
+    if _yt_uploader is None:
+        try:
+            from youtube_uploader import YouTubeUploader
+            _yt_uploader = YouTubeUploader(status_callback=lambda msg: debug_log(msg))
+        except ImportError:
+            return None
+    return _yt_uploader
+
+
+@app.route("/api/publish/youtube/status", methods=["GET"])
+def youtube_publish_status():
+    """Check YouTube OAuth status"""
+    yt = _get_yt_uploader()
+    if yt is None:
+        return jsonify({"available": False, "reason": "youtube_uploader module not available"})
+
+    configured = yt.is_configured()
+    authenticated = yt.is_authenticated()
+    channel_info = None
+    if authenticated:
+        try:
+            channel_info = yt.get_channel_info()
+        except Exception:
+            pass
+
+    return jsonify({
+        "available": True,
+        "configured": configured,
+        "authenticated": authenticated,
+        "channel": channel_info,
+    })
+
+
+@app.route("/api/publish/youtube/auth/start", methods=["POST"])
+def youtube_auth_start():
+    """Start YouTube OAuth flow — opens browser for user to login"""
+    yt = _get_yt_uploader()
+    if yt is None:
+        return jsonify({"error": "youtube_uploader module not available"}), 500
+
+    if not yt.is_configured():
+        return jsonify({
+            "error": "client_secret.json not found",
+            "setup_guide": (
+                "Untuk menggunakan YouTube Upload:\n"
+                "1. Buka https://console.cloud.google.com/apis/credentials\n"
+                "2. Buat OAuth 2.0 Client ID (Desktop App)\n"
+                "3. Download client_secret.json\n"
+                "4. Letakkan di folder aplikasi"
+            ),
+        }), 400
+
+    def run_auth():
+        try:
+            yt.authenticate()
+            socketio.emit("youtube_auth_result", {
+                "success": True,
+                "channel": yt.get_channel_info(),
+            })
+        except Exception as e:
+            socketio.emit("youtube_auth_result", {
+                "success": False,
+                "error": str(e),
+            })
+
+    threading.Thread(target=run_auth, daemon=True).start()
+    return jsonify({"status": "auth_started", "message": "Browser akan terbuka untuk login YouTube"})
+
+
+@app.route("/api/publish/youtube/disconnect", methods=["POST"])
+def youtube_disconnect():
+    """Disconnect YouTube account"""
+    yt = _get_yt_uploader()
+    if yt is None:
+        return jsonify({"error": "youtube_uploader module not available"}), 500
+    yt.disconnect()
+    return jsonify({"status": "disconnected"})
+
+
+@app.route("/api/publish/youtube/upload", methods=["POST"])
+def youtube_upload():
+    """Upload a clip to YouTube"""
+    yt = _get_yt_uploader()
+    if yt is None:
+        return jsonify({"error": "youtube_uploader module not available"}), 500
+
+    if not yt.is_authenticated():
+        return jsonify({"error": "Belum login YouTube. Hubungkan akun terlebih dahulu."}), 401
+
+    data = request.json or {}
+    video_path = data.get("video_path", "")
+    title = data.get("title", "")
+    description = data.get("description", "")
+    tags = data.get("tags", [])
+    privacy = data.get("privacy", "private")
+    publish_at = data.get("publish_at")
+
+    if not video_path or not Path(video_path).exists():
+        return jsonify({"error": "Video file not found"}), 404
+    if not title:
+        return jsonify({"error": "Title is required"}), 400
+
+    upload_id = str(uuid.uuid4())[:8]
+
+    def do_upload():
+        try:
+            socketio.emit("publish_progress", {"id": upload_id, "platform": "youtube", "progress": 0, "status": "uploading"})
+            result = yt.upload_video(
+                video_path=video_path,
+                title=title,
+                description=description,
+                tags=tags,
+                privacy_status=privacy,
+                publish_at=publish_at,
+                progress_callback=lambda p: socketio.emit("publish_progress", {
+                    "id": upload_id, "platform": "youtube", "progress": p, "status": "uploading",
+                }),
+            )
+            socketio.emit("publish_complete", {"id": upload_id, "platform": "youtube", "result": result})
+        except Exception as e:
+            socketio.emit("publish_complete", {
+                "id": upload_id, "platform": "youtube",
+                "result": {"success": False, "error": str(e)},
+            })
+
+    threading.Thread(target=do_upload, daemon=True).start()
+    return jsonify({"status": "upload_started", "upload_id": upload_id})
+
+
+@app.route("/api/publish/youtube/seo", methods=["POST"])
+def youtube_generate_seo():
+    """Generate SEO metadata for a clip using AI"""
+    data = request.json or {}
+    clip_title = data.get("title", "")
+    hook_text = data.get("hook_text", "")
+    if not clip_title:
+        return jsonify({"error": "title is required"}), 400
+
+    api_key = config_manager.get("api_key", "")
+    base_url = config_manager.get("base_url", "https://api.openai.com/v1")
+    model = config_manager.get("model", "gpt-4.1")
+
+    if not api_key:
+        ai_providers = config_manager.get("ai_providers", {})
+        hf = ai_providers.get("highlight_finder", {})
+        api_key = hf.get("api_key", "")
+        base_url = hf.get("base_url", base_url)
+        model = hf.get("model", model)
+
+    if not api_key:
+        return jsonify({"error": "API key belum dikonfigurasi. Atur di Settings > AI API."}), 400
+
+    try:
+        from youtube_uploader import generate_seo_metadata
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        metadata = generate_seo_metadata(client, clip_title, hook_text, model=model)
+        return jsonify(metadata)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── TikTok Publish ───────────────────────────────────────────────────
+
+_tt_uploader = None
+
+
+def _get_tt_uploader():
+    """Get or create TikTokUploader instance"""
+    global _tt_uploader
+    if _tt_uploader is None:
+        try:
+            from tiktok_uploader import TikTokUploader
+            _tt_uploader = TikTokUploader(
+                config=config_manager,
+                status_callback=lambda msg: debug_log(msg),
+            )
+        except ImportError:
+            return None
+    return _tt_uploader
+
+
+@app.route("/api/publish/tiktok/status", methods=["GET"])
+def tiktok_publish_status():
+    """Check TikTok OAuth status"""
+    tt = _get_tt_uploader()
+    if tt is None:
+        return jsonify({"available": False, "reason": "tiktok_uploader module not available"})
+
+    configured = tt.is_configured()
+    authenticated = tt.is_authenticated()
+    user_info = None
+    if authenticated:
+        try:
+            user_info = tt.get_user_info()
+        except Exception:
+            pass
+
+    return jsonify({
+        "available": True,
+        "configured": configured,
+        "authenticated": authenticated,
+        "user": user_info,
+        "mode": tt.mode,
+    })
+
+
+@app.route("/api/publish/tiktok/config", methods=["POST"])
+def tiktok_save_config():
+    """Save TikTok client credentials"""
+    data = request.json or {}
+    client_key = data.get("client_key", "")
+    client_secret = data.get("client_secret", "")
+
+    if not client_key or not client_secret:
+        return jsonify({"error": "client_key and client_secret are required"}), 400
+
+    tiktok_config = config_manager.get("tiktok", {})
+    tiktok_config["client_key"] = client_key
+    tiktok_config["client_secret"] = client_secret
+    config_manager.config["tiktok"] = tiktok_config
+    config_manager.save()
+
+    # Reinitialize uploader with new config
+    global _tt_uploader
+    _tt_uploader = None
+
+    return jsonify({"status": "saved"})
+
+
+@app.route("/api/publish/tiktok/auth/start", methods=["POST"])
+def tiktok_auth_start():
+    """Start TikTok OAuth flow"""
+    tt = _get_tt_uploader()
+    if tt is None:
+        return jsonify({"error": "tiktok_uploader module not available"}), 500
+
+    if not tt.is_configured():
+        return jsonify({
+            "error": "TikTok credentials not configured",
+            "setup_guide": (
+                "Untuk menggunakan TikTok Upload:\n"
+                "1. Buka https://developers.tiktok.com/\n"
+                "2. Buat App dan dapatkan Client Key & Client Secret\n"
+                "3. Masukkan di Settings > Publish > TikTok"
+            ),
+        }), 400
+
+    def run_auth():
+        try:
+            tt.authenticate()
+            socketio.emit("tiktok_auth_result", {
+                "success": True,
+                "user": tt.get_user_info(),
+            })
+        except Exception as e:
+            socketio.emit("tiktok_auth_result", {
+                "success": False,
+                "error": str(e),
+            })
+
+    threading.Thread(target=run_auth, daemon=True).start()
+    return jsonify({"status": "auth_started", "message": "Browser akan terbuka untuk otorisasi TikTok"})
+
+
+@app.route("/api/publish/tiktok/disconnect", methods=["POST"])
+def tiktok_disconnect():
+    """Disconnect TikTok account"""
+    tt = _get_tt_uploader()
+    if tt is None:
+        return jsonify({"error": "tiktok_uploader module not available"}), 500
+    tt.disconnect()
+    return jsonify({"status": "disconnected"})
+
+
+@app.route("/api/publish/tiktok/upload", methods=["POST"])
+def tiktok_upload():
+    """Upload a clip to TikTok"""
+    tt = _get_tt_uploader()
+    if tt is None:
+        return jsonify({"error": "tiktok_uploader module not available"}), 500
+
+    if not tt.is_authenticated():
+        return jsonify({"error": "Belum login TikTok. Hubungkan akun terlebih dahulu."}), 401
+
+    data = request.json or {}
+    video_path = data.get("video_path", "")
+    title = data.get("title", "")
+    privacy = data.get("privacy", "SELF_ONLY")
+    disable_duet = data.get("disable_duet", False)
+    disable_comment = data.get("disable_comment", False)
+    disable_stitch = data.get("disable_stitch", False)
+
+    if not video_path or not Path(video_path).exists():
+        return jsonify({"error": "Video file not found"}), 404
+    if not title:
+        return jsonify({"error": "Title/caption is required"}), 400
+
+    upload_id = str(uuid.uuid4())[:8]
+
+    def do_upload():
+        try:
+            socketio.emit("publish_progress", {"id": upload_id, "platform": "tiktok", "progress": 0, "status": "uploading"})
+            result = tt.upload_video(
+                video_path=video_path,
+                title=title,
+                privacy_level=privacy,
+                disable_duet=disable_duet,
+                disable_comment=disable_comment,
+                disable_stitch=disable_stitch,
+                progress_callback=lambda p: socketio.emit("publish_progress", {
+                    "id": upload_id, "platform": "tiktok", "progress": p, "status": "uploading",
+                }),
+            )
+            socketio.emit("publish_complete", {"id": upload_id, "platform": "tiktok", "result": result})
+        except Exception as e:
+            socketio.emit("publish_complete", {
+                "id": upload_id, "platform": "tiktok",
+                "result": {"success": False, "error": str(e)},
+            })
+
+    threading.Thread(target=do_upload, daemon=True).start()
+    return jsonify({"status": "upload_started", "upload_id": upload_id})
+
+
+# ════════════════════════════════════════════════════════════════════
 #  Helpers
 # ════════════════════════════════════════════════════════════════════
 

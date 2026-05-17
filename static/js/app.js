@@ -630,6 +630,7 @@ async function loadSessions() {
               <div class="clip-actions">
                 <button class="btn btn-secondary btn-sm" onclick="playVideo('${clip.video_path.replace(/'/g, "\\'")}', '${clip.title.replace(/'/g, "\\'")}')">▶</button>
                 <a class="btn btn-secondary btn-sm" href="/api/sessions/download?path=${encodeURIComponent(clip.video_path)}" download>⬇</a>
+                <button class="btn btn-primary btn-sm" onclick="openPublishModal('${clip.video_path.replace(/'/g, "\\'")}', '${clip.title.replace(/'/g, "\\'")}', '${(clip.hook_text || '').replace(/'/g, "\\'")}')">📤</button>
               </div>
             </div>
           `).join('')}
@@ -706,6 +707,10 @@ function openSettingsSubpage(key) {
   document.querySelectorAll('.settings-subpage').forEach(sp => sp.classList.remove('active'));
   const subpage = document.getElementById('settings-' + key);
   if (subpage) subpage.classList.add('active');
+  if (key === 'publish') {
+    loadYouTubePublishStatus();
+    loadTikTokPublishStatus();
+  }
 }
 
 function closeSettingsSubpage() {
@@ -1160,6 +1165,377 @@ function showToast(message, type = 'info') {
     setTimeout(() => toast.remove(), 300);
   }, 4000);
 }
+
+
+// ── Auto Publish (YouTube & TikTok) ────────────────
+
+// Socket events for publish progress
+socket.on('publish_progress', (data) => {
+  const bar = document.getElementById('pub-progress-bar');
+  const text = document.getElementById('pub-progress-text');
+  if (bar) bar.style.width = data.progress + '%';
+  if (text) text.textContent = `Uploading ke ${data.platform}... ${data.progress}%`;
+});
+
+socket.on('publish_complete', (data) => {
+  const section = document.getElementById('pub-progress-section');
+  const btn = document.getElementById('pub-upload-btn');
+  const text = document.getElementById('pub-progress-text');
+
+  if (data.result && data.result.success) {
+    if (text) text.textContent = 'Upload berhasil!';
+    showToast(`Upload ke ${data.platform} berhasil!${data.result.url ? ' ' + data.result.url : ''}`, 'success');
+    setTimeout(() => closePublishModal(), 2000);
+  } else {
+    const errMsg = (data.result && data.result.error) || 'Upload gagal';
+    if (text) text.textContent = errMsg;
+    showToast(`Gagal upload ke ${data.platform}: ${errMsg}`, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Upload Sekarang'; }
+  }
+});
+
+socket.on('youtube_auth_result', (data) => {
+  if (data.success) {
+    showToast('YouTube terhubung!', 'success');
+    loadYouTubePublishStatus();
+  } else {
+    showToast('Gagal menghubungkan YouTube: ' + (data.error || ''), 'error');
+  }
+});
+
+socket.on('tiktok_auth_result', (data) => {
+  if (data.success) {
+    showToast('TikTok terhubung!', 'success');
+    loadTikTokPublishStatus();
+  } else {
+    showToast('Gagal menghubungkan TikTok: ' + (data.error || ''), 'error');
+  }
+});
+
+// ── YouTube Publish Functions ──────────────────────
+async function loadYouTubePublishStatus() {
+  try {
+    const resp = await fetch('/api/publish/youtube/status');
+    const data = await resp.json();
+    const statusEl = document.getElementById('yt-publish-status');
+    const infoEl = document.getElementById('yt-channel-info');
+    const connectBtn = document.getElementById('yt-connect-btn');
+    const disconnectBtn = document.getElementById('yt-disconnect-btn');
+
+    if (!data.available) {
+      statusEl.innerHTML = '<span class="status-dot red"></span><span>Module tidak tersedia</span>';
+      if (connectBtn) connectBtn.style.display = 'none';
+      return;
+    }
+
+    if (data.authenticated && data.channel) {
+      statusEl.innerHTML = '<span class="status-dot green"></span><span>Terhubung</span>';
+      if (infoEl) {
+        infoEl.style.display = 'block';
+        document.getElementById('yt-channel-name').textContent = data.channel.title || '';
+        document.getElementById('yt-channel-subs').textContent = (data.channel.subscribers || '0') + ' subscribers';
+        const thumb = document.getElementById('yt-channel-thumb');
+        if (data.channel.thumbnail) thumb.src = data.channel.thumbnail;
+        else thumb.style.display = 'none';
+      }
+      if (connectBtn) connectBtn.style.display = 'none';
+      if (disconnectBtn) disconnectBtn.style.display = 'inline-flex';
+    } else if (data.configured) {
+      statusEl.innerHTML = '<span class="status-dot yellow"></span><span>Belum login</span>';
+      if (infoEl) infoEl.style.display = 'none';
+      if (connectBtn) connectBtn.style.display = 'inline-flex';
+      if (disconnectBtn) disconnectBtn.style.display = 'none';
+    } else {
+      statusEl.innerHTML = '<span class="status-dot red"></span><span>client_secret.json belum ada</span>';
+      if (infoEl) infoEl.style.display = 'none';
+      if (connectBtn) connectBtn.style.display = 'inline-flex';
+      if (disconnectBtn) disconnectBtn.style.display = 'none';
+    }
+  } catch (e) {
+    console.error('Failed to load YouTube publish status:', e);
+  }
+}
+
+async function connectYouTube() {
+  const btn = document.getElementById('yt-connect-btn');
+  btn.disabled = true;
+  btn.textContent = 'Menghubungkan...';
+
+  try {
+    const resp = await fetch('/api/publish/youtube/auth/start', { method: 'POST' });
+    const data = await resp.json();
+    if (data.error) {
+      showToast(data.error, 'error');
+      if (data.setup_guide) showToast(data.setup_guide, 'info');
+    } else {
+      showToast(data.message || 'Browser terbuka untuk login YouTube...', 'info');
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = '🔗 Hubungkan YouTube';
+}
+
+async function disconnectYouTube() {
+  if (!confirm('Putuskan koneksi YouTube?')) return;
+  try {
+    await fetch('/api/publish/youtube/disconnect', { method: 'POST' });
+    showToast('YouTube terputus', 'info');
+    loadYouTubePublishStatus();
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+// ── TikTok Publish Functions ──────────────────────
+async function loadTikTokPublishStatus() {
+  try {
+    const resp = await fetch('/api/publish/tiktok/status');
+    const data = await resp.json();
+    const statusEl = document.getElementById('tt-publish-status');
+    const infoEl = document.getElementById('tt-user-info');
+    const connectBtn = document.getElementById('tt-connect-btn');
+    const disconnectBtn = document.getElementById('tt-disconnect-btn');
+
+    if (!data.available) {
+      statusEl.innerHTML = '<span class="status-dot red"></span><span>Module tidak tersedia</span>';
+      if (connectBtn) connectBtn.style.display = 'none';
+      return;
+    }
+
+    if (data.authenticated && data.user) {
+      statusEl.innerHTML = '<span class="status-dot green"></span><span>Terhubung</span>';
+      if (infoEl) {
+        infoEl.style.display = 'block';
+        document.getElementById('tt-user-name').textContent = data.user.display_name || 'TikTok User';
+        document.getElementById('tt-mode-badge').textContent = data.mode === 'sandbox' ? 'Sandbox Mode' : 'Production';
+        const avatar = document.getElementById('tt-user-avatar');
+        if (data.user.avatar_url) avatar.src = data.user.avatar_url;
+        else avatar.style.display = 'none';
+      }
+      if (connectBtn) connectBtn.style.display = 'none';
+      if (disconnectBtn) disconnectBtn.style.display = 'inline-flex';
+    } else if (data.configured) {
+      statusEl.innerHTML = '<span class="status-dot yellow"></span><span>Belum login</span>';
+      if (infoEl) infoEl.style.display = 'none';
+      if (connectBtn) connectBtn.style.display = 'inline-flex';
+      if (disconnectBtn) disconnectBtn.style.display = 'none';
+    } else {
+      statusEl.innerHTML = '<span class="status-dot red"></span><span>Credentials belum dikonfigurasi</span>';
+      if (infoEl) infoEl.style.display = 'none';
+      if (connectBtn) connectBtn.style.display = 'inline-flex';
+      if (disconnectBtn) disconnectBtn.style.display = 'none';
+    }
+
+    // Load saved credentials into form
+    const ttConfig = (await (await fetch('/api/config')).json()).tiktok || {};
+    if (ttConfig.client_key) document.getElementById('tt-client-key').value = ttConfig.client_key;
+  } catch (e) {
+    console.error('Failed to load TikTok publish status:', e);
+  }
+}
+
+async function saveTikTokConfig() {
+  const clientKey = document.getElementById('tt-client-key').value.trim();
+  const clientSecret = document.getElementById('tt-client-secret').value.trim();
+
+  if (!clientKey || !clientSecret) {
+    showToast('Client Key dan Client Secret wajib diisi', 'error');
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/publish/tiktok/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_key: clientKey, client_secret: clientSecret }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      showToast(data.error, 'error');
+    } else {
+      showToast('TikTok credentials tersimpan!', 'success');
+      loadTikTokPublishStatus();
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+async function connectTikTok() {
+  const btn = document.getElementById('tt-connect-btn');
+  btn.disabled = true;
+  btn.textContent = 'Menghubungkan...';
+
+  try {
+    const resp = await fetch('/api/publish/tiktok/auth/start', { method: 'POST' });
+    const data = await resp.json();
+    if (data.error) {
+      showToast(data.error, 'error');
+      if (data.setup_guide) showToast(data.setup_guide, 'info');
+    } else {
+      showToast(data.message || 'Browser terbuka untuk otorisasi TikTok...', 'info');
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = '🔗 Hubungkan TikTok';
+}
+
+async function disconnectTikTok() {
+  if (!confirm('Putuskan koneksi TikTok?')) return;
+  try {
+    await fetch('/api/publish/tiktok/disconnect', { method: 'POST' });
+    showToast('TikTok terputus', 'info');
+    loadTikTokPublishStatus();
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+// ── Publish Modal ─────────────────────────────────
+function openPublishModal(videoPath, title, hookText) {
+  document.getElementById('pub-video-path').value = videoPath;
+  document.getElementById('pub-hook-text').value = hookText || '';
+  document.getElementById('pub-title').value = title || '';
+  document.getElementById('pub-description').value = '';
+  document.getElementById('pub-tags').value = 'shorts, viral, fyp';
+  document.getElementById('pub-platform').value = 'youtube';
+  document.getElementById('pub-privacy').value = 'private';
+  document.getElementById('pub-progress-section').style.display = 'none';
+  document.getElementById('pub-upload-btn').disabled = false;
+  document.getElementById('pub-upload-btn').textContent = '📤 Upload Sekarang';
+  updatePubTitleCount();
+  onPublishPlatformChange();
+  document.getElementById('publish-modal').classList.add('active');
+}
+
+function closePublishModal(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('publish-modal').classList.remove('active');
+}
+
+function updatePubTitleCount() {
+  const input = document.getElementById('pub-title');
+  const count = document.getElementById('pub-title-count');
+  const platform = document.getElementById('pub-platform').value;
+  const max = platform === 'tiktok' ? 150 : 100;
+  input.maxLength = max;
+  count.textContent = `${(input.value || '').length}/${max}`;
+}
+
+function onPublishPlatformChange() {
+  const platform = document.getElementById('pub-platform').value;
+  const descGroup = document.getElementById('pub-desc-group');
+  const tagsGroup = document.getElementById('pub-tags-group');
+  const seoGroup = document.getElementById('pub-seo-group');
+  const privacySelect = document.getElementById('pub-privacy');
+
+  if (platform === 'tiktok') {
+    descGroup.style.display = 'none';
+    tagsGroup.style.display = 'none';
+    seoGroup.style.display = 'none';
+    // TikTok privacy options
+    privacySelect.innerHTML = `
+      <option value="SELF_ONLY">Private (Hanya Saya)</option>
+      <option value="MUTUAL_FOLLOW_FRIENDS">Teman</option>
+      <option value="FOLLOWER_OF_CREATOR">Pengikut</option>
+      <option value="PUBLIC_TO_EVERYONE">Publik</option>
+    `;
+  } else {
+    descGroup.style.display = 'block';
+    tagsGroup.style.display = 'block';
+    seoGroup.style.display = 'block';
+    privacySelect.innerHTML = `
+      <option value="private">Private</option>
+      <option value="unlisted">Unlisted</option>
+      <option value="public">Public</option>
+    `;
+  }
+  updatePubTitleCount();
+}
+
+async function generateSeoMetadata() {
+  const title = document.getElementById('pub-title').value;
+  const hookText = document.getElementById('pub-hook-text').value;
+  if (!title) { showToast('Judul wajib diisi', 'error'); return; }
+
+  showToast('Generating SEO metadata...', 'info');
+  try {
+    const resp = await fetch('/api/publish/youtube/seo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, hook_text: hookText }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      showToast(data.error, 'error');
+      return;
+    }
+    if (data.title) document.getElementById('pub-title').value = data.title;
+    if (data.description) document.getElementById('pub-description').value = data.description;
+    if (data.tags) document.getElementById('pub-tags').value = data.tags.join(', ');
+    updatePubTitleCount();
+    showToast('SEO metadata di-generate!', 'success');
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+async function doPublishUpload() {
+  const platform = document.getElementById('pub-platform').value;
+  const videoPath = document.getElementById('pub-video-path').value;
+  const title = document.getElementById('pub-title').value.trim();
+  const privacy = document.getElementById('pub-privacy').value;
+  const btn = document.getElementById('pub-upload-btn');
+
+  if (!title) { showToast('Judul wajib diisi', 'error'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Uploading...';
+  document.getElementById('pub-progress-section').style.display = 'block';
+  document.getElementById('pub-progress-bar').style.width = '0%';
+
+  const endpoint = platform === 'tiktok' ? '/api/publish/tiktok/upload' : '/api/publish/youtube/upload';
+  const body = { video_path: videoPath, title, privacy };
+
+  if (platform === 'youtube') {
+    body.description = document.getElementById('pub-description').value;
+    body.tags = document.getElementById('pub-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  }
+
+  try {
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      showToast(data.error, 'error');
+      btn.disabled = false;
+      btn.textContent = '📤 Upload Sekarang';
+      document.getElementById('pub-progress-section').style.display = 'none';
+    }
+    // Progress updates come via socket
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = '📤 Upload Sekarang';
+    document.getElementById('pub-progress-section').style.display = 'none';
+  }
+}
+
+// ── Load Publish Status on Settings Open ──────────
+const _origOpenSettingsSubpage = typeof openSettingsSubpage !== 'undefined' ? openSettingsSubpage : null;
+
+// Attach pub-title counter
+document.addEventListener('DOMContentLoaded', () => {
+  const pubTitle = document.getElementById('pub-title');
+  if (pubTitle) pubTitle.addEventListener('input', updatePubTitleCount);
+});
 
 
 // ── Init ───────────────────────────────────────────
