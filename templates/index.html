@@ -84,19 +84,42 @@
           <div id="source-video-name" style="font-size:11px; color:var(--text-secondary); margin-top:8px;"></div>
         </div>
 
-        <!-- Cookies -->
+        <!-- YouTube Auth -->
         <div class="card">
-          <div class="card-title">🍪 Cookies YouTube</div>
+          <div class="card-title">🔐 YouTube Login</div>
           <div id="cookies-status" class="status-row">
             <span class="status-dot red"></span>
-            <span>Belum ada cookies</span>
+            <span>Belum login</span>
           </div>
+          <!-- Auto Login Button (Desktop) -->
           <div style="margin-top:8px">
-            <label for="cookies-upload" class="btn btn-secondary btn-sm btn-block" style="cursor:pointer">
-              📁 Upload File Cookies
+            <button id="btn-auto-login" class="btn btn-primary btn-sm btn-block"
+                    onclick="autoExtractCookies()" title="Otomatis ambil cookies dari browser yang sudah login YouTube">
+              🔑 Auto Login dari Browser
+            </button>
+          </div>
+          <!-- Browser selector (hidden by default, shown after detection) -->
+          <div id="browser-selector" style="display:none; margin-top:6px">
+            <select id="browser-select" class="form-select" style="font-size:12px; padding:4px 8px; width:100%; margin-bottom:6px">
+            </select>
+            <button class="btn btn-secondary btn-sm btn-block" onclick="extractFromSelectedBrowser()">
+              Extract dari Browser Terpilih
+            </button>
+          </div>
+          <!-- Manual Upload (fallback) -->
+          <div style="margin-top:6px">
+            <label for="cookies-upload" class="btn btn-secondary btn-sm btn-block" style="cursor:pointer; font-size:11px">
+              📁 Upload Manual (cookies.txt)
             </label>
             <input type="file" id="cookies-upload" accept=".txt" style="display:none"
                    onchange="uploadCookies(this)">
+          </div>
+          <!-- Delete cookies -->
+          <div id="cookies-delete-row" style="display:none; margin-top:4px">
+            <button class="btn btn-sm btn-block" style="font-size:11px; color:#ff6b6b; background:transparent; border:1px solid #ff6b6b40"
+                    onclick="deleteCookies()">
+              🗑 Hapus Cookies
+            </button>
           </div>
         </div>
       </div>

@@ -214,7 +214,7 @@ async function pasteUrl() {
 }
 
 
-// ── Cookies ────────────────────────────────────────
+// ── YouTube Auth / Cookies ──────────────────────────
 async function uploadCookies(input) {
   const file = input.files[0];
   if (!file) return;
@@ -234,15 +234,116 @@ async function uploadCookies(input) {
   }
 }
 
+async function autoExtractCookies() {
+  const btn = document.getElementById('btn-auto-login');
+  const origText = btn.innerHTML;
+  btn.innerHTML = '⏳ Mendeteksi browser...';
+  btn.disabled = true;
+
+  try {
+    // First check available browsers
+    const brResp = await fetch('/api/youtube/browsers');
+    const brData = await brResp.json();
+
+    if (brData.count === 0) {
+      showToast('Tidak ada browser terdeteksi. Gunakan Upload Manual.', 'error');
+      btn.innerHTML = origText;
+      btn.disabled = false;
+      return;
+    }
+
+    // If multiple browsers, show selector
+    if (brData.count > 1) {
+      const selector = document.getElementById('browser-selector');
+      const select = document.getElementById('browser-select');
+      const browserNames = {
+        chrome: 'Google Chrome', edge: 'Microsoft Edge', firefox: 'Firefox',
+        brave: 'Brave', chromium: 'Chromium', opera: 'Opera', vivaldi: 'Vivaldi'
+      };
+      select.innerHTML = brData.browsers.map(b =>
+        `<option value="${b}">${browserNames[b] || b}</option>`
+      ).join('');
+      selector.style.display = 'block';
+    }
+
+    // Auto-extract from best browser
+    btn.innerHTML = '⏳ Extracting cookies...';
+    const resp = await fetch('/api/youtube/extract-cookies', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({})
+    });
+    const data = await resp.json();
+
+    if (data.status === 'ok') {
+      showToast(`Login berhasil! ${data.count} cookies dari ${data.browser}`, 'success');
+      checkCookiesStatus();
+    } else if (data.status === 'warning') {
+      showToast(data.message, 'warning');
+      checkCookiesStatus();
+    } else {
+      showToast(data.message || 'Gagal extract cookies', 'error');
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+
+  btn.innerHTML = origText;
+  btn.disabled = false;
+}
+
+async function extractFromSelectedBrowser() {
+  const browser = document.getElementById('browser-select').value;
+  if (!browser) return;
+
+  try {
+    showToast(`Extracting dari ${browser}...`, 'info');
+    const resp = await fetch('/api/youtube/extract-cookies', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({browser})
+    });
+    const data = await resp.json();
+
+    if (data.status === 'ok') {
+      showToast(`Login berhasil! ${data.count} cookies dari ${browser}`, 'success');
+      checkCookiesStatus();
+    } else {
+      showToast(data.message || 'Gagal extract cookies', 'error');
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+async function deleteCookies() {
+  try {
+    const resp = await fetch('/api/cookies/delete', {method: 'POST'});
+    const data = await resp.json();
+    showToast(data.message || 'Cookies dihapus', 'success');
+    checkCookiesStatus();
+  } catch (e) {
+    showToast('Gagal menghapus cookies', 'error');
+  }
+}
+
 async function checkCookiesStatus() {
   try {
     const resp = await fetch('/api/cookies/status');
     const data = await resp.json();
     const el = document.getElementById('cookies-status');
+    const deleteRow = document.getElementById('cookies-delete-row');
+
     if (data.has_cookies) {
-      el.innerHTML = `<span class="status-dot green"></span><span>Cookies aktif (${data.count} entri)</span>`;
+      if (data.valid) {
+        el.innerHTML = `<span class="status-dot green"></span><span>Login aktif (${data.count} cookies)</span>`;
+      } else {
+        el.innerHTML = `<span class="status-dot yellow"></span><span>Cookies ada (${data.count}) tapi tidak lengkap</span>`;
+      }
+      if (deleteRow) deleteRow.style.display = 'block';
     } else {
-      el.innerHTML = '<span class="status-dot red"></span><span>Belum ada cookies</span>';
+      el.innerHTML = '<span class="status-dot red"></span><span>Belum login</span>';
+      if (deleteRow) deleteRow.style.display = 'none';
     }
   } catch (e) {}
 }
