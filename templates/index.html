@@ -494,6 +494,39 @@
         </div>
       </div>
 
+      <div class="card">
+        <div class="card-title">Layout Mode</div>
+        <p style="font-size:12px; color:var(--text-muted); margin:4px 0 10px;">
+          Pilih layout video portrait 9:16 yang dihasilkan.
+        </p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <label class="layout-option" style="flex:1; min-width:140px;">
+            <input type="radio" name="layout_mode" value="portrait" checked>
+            <div class="layout-card">
+              <div style="font-size:24px; text-align:center;">📱</div>
+              <div style="font-weight:600; font-size:13px;">Portrait</div>
+              <div style="font-size:11px; color:var(--text-muted);">Crop ke speaker (default)</div>
+            </div>
+          </label>
+          <label class="layout-option" style="flex:1; min-width:140px;">
+            <input type="radio" name="layout_mode" value="split_speaker">
+            <div class="layout-card">
+              <div style="font-size:24px; text-align:center;">🎙️</div>
+              <div style="font-weight:600; font-size:13px;">Split Podcast</div>
+              <div style="font-size:11px; color:var(--text-muted);">Atas 50% wide + bawah 50% close-up</div>
+            </div>
+          </label>
+          <label class="layout-option" style="flex:1; min-width:140px;">
+            <input type="radio" name="layout_mode" value="split_gameplay">
+            <div class="layout-card">
+              <div style="font-size:24px; text-align:center;">🎮</div>
+              <div style="font-weight:600; font-size:13px;">Split Gaming</div>
+              <div style="font-size:11px; color:var(--text-muted);">Atas 60% gameplay + bawah 40% face cam</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
       <button class="btn btn-primary" onclick="saveOutputSettings()">💾 Simpan Output</button>
     </div>
 

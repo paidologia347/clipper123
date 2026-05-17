@@ -756,6 +756,9 @@ async function loadSettingsData() {
     document.getElementById('temperature').value = data.temperature || 1.0;
     document.getElementById('min-clip-duration').value = data.min_clip_duration ?? 58;
     document.getElementById('max-clip-duration').value = data.max_clip_duration ?? 120;
+    const lm = data.layout_mode || 'portrait';
+    const radio = document.querySelector(`input[name="layout_mode"][value="${lm}"]`);
+    if (radio) radio.checked = true;
   } catch (e) {}
 
   // Load watermark settings
@@ -980,12 +983,14 @@ async function saveOutputSettings() {
     showToast('Min durasi klip harus lebih kecil dari Max', 'error');
     return;
   }
+  const layoutRadio = document.querySelector('input[name="layout_mode"]:checked');
   const data = {
     output_dir: document.getElementById('output-dir').value,
     system_prompt: document.getElementById('system-prompt').value,
     temperature: parseFloat(document.getElementById('temperature').value),
     min_clip_duration: Number.isFinite(minDur) ? minDur : 58,
     max_clip_duration: Number.isFinite(maxDur) ? maxDur : 120,
+    layout_mode: layoutRadio ? layoutRadio.value : 'portrait',
   };
 
   try {

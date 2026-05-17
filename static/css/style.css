@@ -905,3 +905,21 @@ label {
   font-size: 17px;
   font-weight: 700;
 }
+
+/* Layout Mode radio cards */
+.layout-option { cursor: pointer; }
+.layout-option input[type="radio"] { display: none; }
+.layout-card {
+  padding: 12px;
+  border-radius: 10px;
+  border: 2px solid var(--border);
+  background: var(--bg-card);
+  transition: border-color 0.2s, background 0.2s;
+}
+.layout-option input[type="radio"]:checked + .layout-card {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.layout-card:hover {
+  border-color: var(--border-hover);
+}
