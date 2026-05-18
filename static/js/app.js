@@ -234,6 +234,29 @@ async function uploadCookies(input) {
   }
 }
 
+async function openYouTubeForLogin() {
+  const btn = document.getElementById('btn-open-yt');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Membuka browser...';
+
+  try {
+    const resp = await fetch('/api/youtube/open-browser', {method: 'POST'});
+    const data = await resp.json();
+
+    if (data.status === 'ok') {
+      showToast(data.message, 'info');
+      document.getElementById('step-extract-cookies').style.display = 'block';
+    } else {
+      showToast(data.message || 'Gagal membuka browser', 'error');
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+
+  btn.innerHTML = '🌐 Buka YouTube untuk Login';
+  btn.disabled = false;
+}
+
 async function autoExtractCookies() {
   const btn = document.getElementById('btn-auto-login');
   const origText = btn.innerHTML;
@@ -277,12 +300,13 @@ async function autoExtractCookies() {
 
     if (data.status === 'ok') {
       showToast(`Login berhasil! ${data.count} cookies dari ${data.browser}`, 'success');
+      document.getElementById('step-extract-cookies').style.display = 'none';
       checkCookiesStatus();
     } else if (data.status === 'warning') {
       showToast(data.message, 'warning');
       checkCookiesStatus();
     } else {
-      showToast(data.message || 'Gagal extract cookies', 'error');
+      showToast(data.message || 'Gagal extract cookies. Pastikan browser sudah ditutup dulu.', 'error');
     }
   } catch (e) {
     showToast('Error: ' + e.message, 'error');
@@ -782,13 +806,17 @@ async function loadSettingsData() {
 }
 
 function populateProviderSelector() {
-  const select = document.getElementById('provider-type');
-  select.innerHTML = '';
-  providers.forEach(p => {
-    const opt = document.createElement('option');
-    opt.value = p.key;
-    opt.textContent = p.name;
-    select.appendChild(opt);
+  const selectors = ['provider-type', 'hf-provider', 'cm-provider', 'hm-provider', 'tg-provider'];
+  selectors.forEach(id => {
+    const select = document.getElementById(id);
+    if (!select) return;
+    select.innerHTML = '';
+    providers.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.key;
+      opt.textContent = p.name;
+      select.appendChild(opt);
+    });
   });
 }
 
@@ -801,18 +829,34 @@ function populateAiFields(data) {
   document.getElementById('hf-base-url').value = hf.base_url || '';
   document.getElementById('hf-api-key').value = hf.api_key || '';
   setSelectValue('hf-model', hf.model || 'gpt-4.1');
+  if (hf.provider) setSelectValue('hf-provider', hf.provider);
+  else detectAndSetProvider('hf', hf.base_url);
 
   document.getElementById('cm-base-url').value = cm.base_url || '';
   document.getElementById('cm-api-key').value = cm.api_key || '';
   setSelectValue('cm-model', cm.model || 'whisper-1');
+  if (cm.provider) setSelectValue('cm-provider', cm.provider);
+  else detectAndSetProvider('cm', cm.base_url);
 
   document.getElementById('hm-base-url').value = hm.base_url || '';
   document.getElementById('hm-api-key').value = hm.api_key || '';
   setSelectValue('hm-model', hm.model || 'tts-1');
+  if (hm.provider) setSelectValue('hm-provider', hm.provider);
+  else detectAndSetProvider('hm', hm.base_url);
 
   document.getElementById('tg-base-url').value = tg.base_url || '';
   document.getElementById('tg-api-key').value = tg.api_key || '';
   setSelectValue('tg-model', tg.model || 'gpt-4.1');
+  if (tg.provider) setSelectValue('tg-provider', tg.provider);
+  else detectAndSetProvider('tg', tg.base_url);
+}
+
+function detectAndSetProvider(prefix, baseUrl) {
+  if (!baseUrl || !providers.length) return;
+  const match = providers.find(p => baseUrl.includes(new URL(p.base_url).hostname));
+  if (match) {
+    setSelectValue(prefix + '-provider', match.key);
+  }
 }
 
 function setSelectValue(id, value) {
@@ -836,11 +880,20 @@ function onProviderTypeChange() {
   const provider = providers.find(p => p.key === key);
   if (!provider) return;
 
-  const baseUrl = provider.base_url;
-  document.getElementById('hf-base-url').value = baseUrl;
-  document.getElementById('cm-base-url').value = baseUrl;
-  document.getElementById('hm-base-url').value = baseUrl;
-  document.getElementById('tg-base-url').value = baseUrl;
+  const prefixes = ['hf', 'cm', 'hm', 'tg'];
+  prefixes.forEach(prefix => {
+    document.getElementById(prefix + '-base-url').value = provider.base_url;
+    setSelectValue(prefix + '-provider', key);
+  });
+  showToast(`Semua modul diset ke ${provider.name}`, 'info');
+}
+
+function onModuleProviderChange(prefix) {
+  const key = document.getElementById(prefix + '-provider').value;
+  const provider = providers.find(p => p.key === key);
+  if (!provider) return;
+
+  document.getElementById(prefix + '-base-url').value = provider.base_url;
 }
 
 async function loadModels(prefix) {
@@ -915,21 +968,25 @@ async function validateAllKeys() {
 async function saveAiSettings() {
   const settings = {
     highlight_finder: {
+      provider: document.getElementById('hf-provider').value,
       base_url: document.getElementById('hf-base-url').value,
       api_key: document.getElementById('hf-api-key').value,
       model: document.getElementById('hf-model').value,
     },
     caption_maker: {
+      provider: document.getElementById('cm-provider').value,
       base_url: document.getElementById('cm-base-url').value,
       api_key: document.getElementById('cm-api-key').value,
       model: document.getElementById('cm-model').value,
     },
     hook_maker: {
+      provider: document.getElementById('hm-provider').value,
       base_url: document.getElementById('hm-base-url').value,
       api_key: document.getElementById('hm-api-key').value,
       model: document.getElementById('hm-model').value,
     },
     youtube_title_maker: {
+      provider: document.getElementById('tg-provider').value,
       base_url: document.getElementById('tg-base-url').value,
       api_key: document.getElementById('tg-api-key').value,
       model: document.getElementById('tg-model').value,
@@ -1136,16 +1193,17 @@ async function checkUpdate() {
 // ── Library Install ────────────────────────────────
 async function installLib(name, btn) {
   btn.disabled = true;
-  btn.textContent = 'Downloading...';
+  btn.textContent = 'Memulai...';
 
   try {
     const resp = await fetch(`/api/lib/install/${name}`, {method: 'POST'});
     const data = await resp.json();
-    if (data.status === 'ok') {
-      showToast(`${name} berhasil diinstall!`, 'success');
-      loadLibStatus();
-    } else {
-      showToast(`Gagal install ${name}: ${data.message}`, 'error');
+
+    if (data.status === 'started') {
+      showToast(`Menginstall ${name}... tunggu sebentar`, 'info');
+      pollInstallProgress(name, btn);
+    } else if (data.status === 'error') {
+      showToast(`Gagal: ${data.message}`, 'error');
       btn.disabled = false;
       btn.textContent = 'Download';
     }
@@ -1154,6 +1212,34 @@ async function installLib(name, btn) {
     btn.disabled = false;
     btn.textContent = 'Download';
   }
+}
+
+async function pollInstallProgress(name, btn) {
+  const poll = async () => {
+    try {
+      const resp = await fetch(`/api/lib/install/${name}/progress`);
+      const data = await resp.json();
+
+      if (data.status === 'downloading') {
+        btn.textContent = `Downloading ${data.percent || 0}%`;
+        setTimeout(poll, 1000);
+      } else if (data.status === 'done') {
+        showToast(`${name} berhasil diinstall!`, 'success');
+        loadLibStatus();
+      } else if (data.status === 'error') {
+        showToast(`Gagal install ${name}: ${data.message || 'Unknown error'}`, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Download';
+      } else {
+        setTimeout(poll, 1000);
+      }
+    } catch (e) {
+      showToast(`Error cek progress: ${e.message}`, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Download';
+    }
+  };
+  poll();
 }
 
 

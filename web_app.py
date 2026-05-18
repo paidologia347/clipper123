@@ -354,6 +354,17 @@ def extract_browser_cookies():
     return jsonify(result)
 
 
+@app.route("/api/youtube/open-browser", methods=["POST"])
+def open_youtube_browser():
+    """Open YouTube in system browser for user to login"""
+    import webbrowser
+    try:
+        webbrowser.open("https://accounts.google.com/ServiceLogin?service=youtube&continue=https://www.youtube.com/")
+        return jsonify({"status": "ok", "message": "Browser terbuka — silakan login YouTube, lalu klik 'Ambil Cookies'"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Gagal membuka browser: {e}"}), 500
+
+
 @app.route("/api/youtube/verify-cookies", methods=["GET"])
 def verify_cookies():
     """Verify if current cookies are valid for YouTube"""
@@ -1160,9 +1171,13 @@ def lib_status():
     })
 
 
+# Background install progress tracking
+_install_progress = {}
+
+
 @app.route("/api/lib/install/<name>", methods=["POST"])
 def lib_install(name):
-    """Download and install a library (ffmpeg, deno, yt-dlp)"""
+    """Download and install a library (ffmpeg, deno) — runs in background"""
     from utils.dependency_manager import setup_ffmpeg, setup_deno
     from utils.helpers import get_app_dir
 
@@ -1172,20 +1187,53 @@ def lib_install(name):
     if name not in valid:
         return jsonify({"status": "error", "message": f"Unknown library: {name}"}), 400
 
-    def do_install():
-        if name == "ffmpeg":
-            return setup_ffmpeg(app_dir)
-        elif name == "deno":
-            return setup_deno(app_dir)
-        return False
+    if _install_progress.get(name, {}).get("status") == "downloading":
+        return jsonify({"status": "error", "message": f"{name} sedang diinstall, tunggu selesai"}), 409
 
-    try:
-        success = do_install()
-        if success:
-            return jsonify({"status": "ok", "message": f"{name} installed successfully"})
-        return jsonify({"status": "error", "message": f"Failed to install {name}"}), 500
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    def progress_cb(downloaded, total):
+        pct = int(downloaded / total * 100) if total else 0
+        _install_progress[name] = {
+            "status": "downloading",
+            "downloaded": downloaded,
+            "total": total,
+            "percent": pct,
+        }
+
+    def do_install():
+        try:
+            _install_progress[name] = {"status": "downloading", "percent": 0}
+            if name == "ffmpeg":
+                ok = setup_ffmpeg(app_dir, progress_callback=progress_cb)
+                if ok:
+                    ffmpeg_dir = str(app_dir / "ffmpeg")
+                    if ffmpeg_dir not in os.environ.get("PATH", ""):
+                        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+            elif name == "deno":
+                ok = setup_deno(app_dir, progress_callback=progress_cb)
+                if ok:
+                    bin_dir = str(app_dir / "bin")
+                    if bin_dir not in os.environ.get("PATH", ""):
+                        os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+            else:
+                ok = False
+
+            if ok:
+                _install_progress[name] = {"status": "done", "percent": 100}
+            else:
+                _install_progress[name] = {"status": "error", "message": f"Gagal install {name}. Cek error.log untuk detail."}
+        except Exception as e:
+            _install_progress[name] = {"status": "error", "message": str(e)}
+
+    thread = threading.Thread(target=do_install, daemon=True)
+    thread.start()
+    return jsonify({"status": "started", "message": f"Menginstall {name}..."})
+
+
+@app.route("/api/lib/install/<name>/progress", methods=["GET"])
+def lib_install_progress(name):
+    """Check install progress for a library"""
+    progress = _install_progress.get(name, {"status": "idle"})
+    return jsonify(progress)
 
 
 # ════════════════════════════════════════════════════════════════════

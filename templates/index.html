@@ -91,11 +91,19 @@
             <span class="status-dot red"></span>
             <span>Belum login</span>
           </div>
-          <!-- Auto Login Button (Desktop) -->
+          <!-- Auto Login: Step 1 - Open Browser -->
           <div style="margin-top:8px">
-            <button id="btn-auto-login" class="btn btn-primary btn-sm btn-block"
-                    onclick="autoExtractCookies()" title="Otomatis ambil cookies dari browser yang sudah login YouTube">
-              🔑 Auto Login dari Browser
+            <button id="btn-open-yt" class="btn btn-primary btn-sm btn-block"
+                    onclick="openYouTubeForLogin()" title="Buka YouTube di browser untuk login">
+              🌐 Buka YouTube untuk Login
+            </button>
+          </div>
+          <!-- Auto Login: Step 2 - Extract Cookies (shown after browser opened) -->
+          <div id="step-extract-cookies" style="display:none; margin-top:6px">
+            <p style="font-size:11px; color:var(--text-secondary); margin:4px 0">Sudah login YouTube di browser? Klik tombol di bawah:</p>
+            <button id="btn-auto-login" class="btn btn-success btn-sm btn-block"
+                    onclick="autoExtractCookies()" title="Ambil cookies dari browser">
+              🔑 Ambil Cookies dari Browser
             </button>
           </div>
           <!-- Browser selector (hidden by default, shown after detection) -->
@@ -323,14 +331,22 @@
       <h3 style="margin-bottom:14px">🤖 Konfigurasi AI API</h3>
 
       <div class="card">
-        <div class="card-title">Tipe Provider</div>
-        <select id="provider-type" onchange="onProviderTypeChange()"></select>
+        <div class="card-title">Set Semua Provider</div>
+        <div class="form-row">
+          <select id="provider-type" onchange="onProviderTypeChange()" style="flex:1"></select>
+          <button class="btn btn-secondary btn-sm" onclick="onProviderTypeChange()" style="white-space:nowrap">Terapkan Semua</button>
+        </div>
+        <p style="font-size:11px; color:var(--text-secondary); margin-top:4px">Atau pilih provider berbeda per modul di bawah</p>
       </div>
 
       <div class="module-cards" id="ai-modules">
         <!-- Highlight Finder -->
         <div class="module-card">
           <div class="module-title">🔍 Highlight Finder</div>
+          <div class="form-group">
+            <label>Provider</label>
+            <select id="hf-provider" onchange="onModuleProviderChange('hf')"></select>
+          </div>
           <div class="form-group">
             <label>Base URL</label>
             <input type="text" id="hf-base-url" placeholder="https://api.openai.com/v1">
@@ -352,6 +368,10 @@
         <div class="module-card">
           <div class="module-title">📝 Caption Maker (Whisper)</div>
           <div class="form-group">
+            <label>Provider</label>
+            <select id="cm-provider" onchange="onModuleProviderChange('cm')"></select>
+          </div>
+          <div class="form-group">
             <label>Base URL</label>
             <input type="text" id="cm-base-url" placeholder="https://api.openai.com/v1">
           </div>
@@ -369,6 +389,10 @@
         <div class="module-card">
           <div class="module-title">🪝 Hook Maker (TTS)</div>
           <div class="form-group">
+            <label>Provider</label>
+            <select id="hm-provider" onchange="onModuleProviderChange('hm')"></select>
+          </div>
+          <div class="form-group">
             <label>Base URL</label>
             <input type="text" id="hm-base-url" placeholder="https://api.openai.com/v1">
           </div>
@@ -385,6 +409,10 @@
         <!-- Title Generator -->
         <div class="module-card">
           <div class="module-title">📰 Generator Judul YouTube</div>
+          <div class="form-group">
+            <label>Provider</label>
+            <select id="tg-provider" onchange="onModuleProviderChange('tg')"></select>
+          </div>
           <div class="form-group">
             <label>Base URL</label>
             <input type="text" id="tg-base-url" placeholder="https://api.openai.com/v1">
