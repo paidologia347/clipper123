@@ -112,6 +112,15 @@ AI_PROVIDERS_CONFIG = {
         "docs_url": "https://replicate.com/account/api-tokens",
         "requires_load": False
     },
+    "edge_tts": {
+        "name": "🔊 Edge TTS (Free)",
+        "base_url": "",
+        "description": "Microsoft Edge TTS — 100% gratis tanpa API key, suara Indonesia",
+        "default_models": ["id-ID-ArdiNeural", "id-ID-GadisNeural"],
+        "api_key_format": "tidak perlu",
+        "docs_url": "https://github.com/rany2/edge-tts",
+        "requires_load": False
+    },
     "custom": {
         "name": "⚙️ Custom/Local",
         "base_url": "http://localhost:8000/v1",
@@ -142,15 +151,16 @@ SPECIALIZED_MODELS = {
         "google": [],
         "nvidia_nim": [],
         "alibaba": ["qwen-audio-turbo"],
-        "groq": ["whisper-large-v3"],
+        "groq": ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"],
     },
     "hook_maker": {
         "ytclip": ["tts-1-hd", "tts-1"],
         "openai": ["tts-1-hd", "tts-1"],
-        "google": [],
+        "google": ["gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"],
         "nvidia_nim": [],
         "alibaba": ["cosyvoice-v1"],
         "anthropic": [],
+        "edge_tts": ["id-ID-ArdiNeural", "id-ID-GadisNeural"],
     },
     "youtube_title_maker": {
         "ytclip": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
