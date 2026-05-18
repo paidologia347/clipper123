@@ -15,6 +15,18 @@ flask_data = collect_data_files('flask')
 engineio_data = collect_data_files('engineio')
 socketio_data = collect_data_files('socketio')
 
+# Collect google-genai data (for Gemini TTS)
+try:
+    google_genai_data = collect_data_files('google.genai')
+except Exception:
+    google_genai_data = []
+
+# Collect edge-tts data
+try:
+    edge_tts_data = collect_data_files('edge_tts')
+except Exception:
+    edge_tts_data = []
+
 icon_path = 'assets/icon.ico' if os.path.exists('assets/icon.ico') else None
 
 # Auto-detect yt-dlp and Deno executable paths
@@ -37,6 +49,8 @@ a = Analysis(
         *flask_data,
         *engineio_data,
         *socketio_data,
+        *google_genai_data,
+        *edge_tts_data,
         ('templates', 'templates'),
         ('static', 'static'),
         ('assets', 'assets'),
@@ -64,6 +78,14 @@ a = Analysis(
         'utils.helpers',
         'utils.logger',
         'utils.dependency_manager',
+        # Gemini TTS (native SDK)
+        'google.genai',
+        'google.genai.types',
+        # Edge TTS (free, no API key)
+        'edge_tts',
+        'asyncio',
+        # Google generativeai (legacy)
+        'google.generativeai',
     ],
     hookspath=[],
     hooksconfig={},
