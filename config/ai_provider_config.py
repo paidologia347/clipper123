@@ -40,6 +40,15 @@ AI_PROVIDERS_CONFIG = {
         "docs_url": "https://build.nvidia.com",
         "requires_load": True
     },
+    "alibaba": {
+        "name": "🟠 Alibaba (Qwen)",
+        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "description": "Alibaba Cloud DashScope — Qwen models, free quota, OpenAI compatible",
+        "default_models": ["qwen-plus", "qwen-turbo", "qwen-max", "qwen-long", "qwen2.5-72b-instruct"],
+        "api_key_format": "sk-*",
+        "docs_url": "https://www.alibabacloud.com/help/en/model-studio/get-api-key",
+        "requires_load": True
+    },
     "groq": {
         "name": "⚡ Groq",
         "base_url": "https://api.groq.com/openai/v1",
@@ -103,6 +112,15 @@ AI_PROVIDERS_CONFIG = {
         "docs_url": "https://replicate.com/account/api-tokens",
         "requires_load": False
     },
+    "edge_tts": {
+        "name": "🔊 Edge TTS (Free)",
+        "base_url": "",
+        "description": "Microsoft Edge TTS — 100% gratis tanpa API key, suara Indonesia",
+        "default_models": ["id-ID-ArdiNeural", "id-ID-GadisNeural"],
+        "api_key_format": "tidak perlu",
+        "docs_url": "https://github.com/rany2/edge-tts",
+        "requires_load": False
+    },
     "custom": {
         "name": "⚙️ Custom/Local",
         "base_url": "http://localhost:8000/v1",
@@ -121,6 +139,7 @@ SPECIALIZED_MODELS = {
         "openai": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
         "nvidia_nim": ["deepseek-ai/deepseek-r1", "meta/llama-3.3-70b-instruct", "google/gemma-3-27b-it"],
+        "alibaba": ["qwen-plus", "qwen-turbo", "qwen-max", "qwen2.5-72b-instruct"],
         "groq": ["mixtral-8x7b-32768", "llama2-70b-4096"],
         "anthropic": ["claude-3-5-sonnet-20241022"],
         "cohere": ["command-r-plus", "command-r"],
@@ -131,20 +150,24 @@ SPECIALIZED_MODELS = {
         "openai": ["whisper-1"],
         "google": [],
         "nvidia_nim": [],
-        "groq": ["whisper-large-v3"],
+        "alibaba": ["qwen-audio-turbo"],
+        "groq": ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"],
     },
     "hook_maker": {
         "ytclip": ["tts-1-hd", "tts-1"],
         "openai": ["tts-1-hd", "tts-1"],
-        "google": [],
+        "google": ["gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"],
         "nvidia_nim": [],
+        "alibaba": ["cosyvoice-v1"],
         "anthropic": [],
+        "edge_tts": ["id-ID-ArdiNeural", "id-ID-GadisNeural"],
     },
     "youtube_title_maker": {
         "ytclip": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "openai": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
         "nvidia_nim": ["deepseek-ai/deepseek-r1", "meta/llama-3.3-70b-instruct"],
+        "alibaba": ["qwen-plus", "qwen-turbo", "qwen-max"],
         "groq": ["mixtral-8x7b-32768"],
         "anthropic": ["claude-3-5-sonnet-20241022"],
     }

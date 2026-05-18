@@ -54,6 +54,20 @@ try:
 except ImportError:
     GOOGLE_GENAI_AVAILABLE = False
 
+try:
+    from google import genai as google_genai
+    from google.genai import types as genai_types
+    GOOGLE_GENAI_NEW_AVAILABLE = True
+except ImportError:
+    GOOGLE_GENAI_NEW_AVAILABLE = False
+
+try:
+    import edge_tts
+    import asyncio
+    EDGE_TTS_AVAILABLE = True
+except ImportError:
+    EDGE_TTS_AVAILABLE = False
+
 # Hide console window on Windows
 SUBPROCESS_FLAGS = 0
 if sys.platform == "win32":
@@ -133,6 +147,7 @@ class AutoClipperCore:
             hm_config = self.ai_providers.get("hook_maker", {})
             self.tts_client = _make_client(hm_config)
             self.tts_model = hm_config.get("model", tts_model)
+            self.tts_provider = hm_config.get("provider", "")
         else:
             # Fallback to single client (backward compatibility)
             self.highlight_client = client
@@ -140,6 +155,7 @@ class AutoClipperCore:
             self.tts_client = client
             self.model = model
             self.tts_model = tts_model
+            self.tts_provider = ""
             self.whisper_model = "whisper-1"
         
         # Keep original client for backward compatibility
@@ -2830,23 +2846,125 @@ Channel: {self.channel_name}
         
         return final if final else smoothed
     
+    def generate_tts_audio(self, text: str) -> str:
+        """Generate TTS audio file. Tries Gemini TTS first, then Edge TTS, then OpenAI-compatible.
+        
+        Returns:
+            str: Path to generated audio file (mp3)
+        """
+        tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
+        
+        # Strategy 1: Gemini TTS (native SDK) — if provider is google and SDK available
+        hm_config = self.ai_providers.get("hook_maker", {})
+        provider = hm_config.get("provider", self.tts_provider)
+        api_key = (hm_config.get("api_key") or "").strip()
+        
+        if provider == "google" and api_key and GOOGLE_GENAI_NEW_AVAILABLE:
+            try:
+                self.log("  TTS: Using Gemini TTS (native SDK)...")
+                client = google_genai.Client(api_key=api_key)
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash-preview-tts",
+                    contents=text,
+                    config=genai_types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=genai_types.SpeechConfig(
+                            voice_config=genai_types.VoiceConfig(
+                                prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
+                                    voice_name="Puck"
+                                )
+                            )
+                        )
+                    )
+                )
+                audio_data = response.candidates[0].content.parts[0].inline_data.data
+                with open(tts_file, 'wb') as f:
+                    f.write(audio_data)
+                self.log(f"  TTS: Gemini TTS OK ({len(audio_data)} bytes)")
+                return tts_file
+            except Exception as e:
+                self.log(f"  TTS: Gemini TTS failed: {e}, trying fallback...")
+        
+        # Strategy 2: Edge TTS (free, no API key needed)
+        if provider in ("edge_tts", "") or not api_key:
+            if EDGE_TTS_AVAILABLE:
+                try:
+                    self.log("  TTS: Using Edge TTS (free)...")
+                    voice = "id-ID-ArdiNeural"  # Indonesian male voice
+                    
+                    async def _generate():
+                        communicate = edge_tts.Communicate(text, voice=voice)
+                        await communicate.save(tts_file)
+                    
+                    # Run async in sync context
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                pool.submit(asyncio.run, _generate()).result(timeout=30)
+                        else:
+                            loop.run_until_complete(_generate())
+                    except RuntimeError:
+                        asyncio.run(_generate())
+                    
+                    self.log(f"  TTS: Edge TTS OK ({os.path.getsize(tts_file)} bytes)")
+                    return tts_file
+                except Exception as e:
+                    self.log(f"  TTS: Edge TTS failed: {e}, trying OpenAI-compatible fallback...")
+        
+        # Strategy 3: OpenAI-compatible TTS (OpenAI, YTClip, etc.)
+        try:
+            self.log(f"  TTS: Using OpenAI-compatible API (model={self.tts_model})...")
+            tts_response = self.tts_client.audio.speech.create(
+                model=self.tts_model,
+                voice="nova",
+                input=text,
+                speed=1.0
+            )
+            with open(tts_file, 'wb') as f:
+                f.write(tts_response.content)
+            self.log(f"  TTS: OpenAI-compatible OK")
+            return tts_file
+        except Exception as e:
+            self.log(f"  TTS: OpenAI-compatible failed: {e}")
+        
+        # Strategy 4: Edge TTS as last resort (if not tried above)
+        if EDGE_TTS_AVAILABLE and provider not in ("edge_tts", ""):
+            try:
+                self.log("  TTS: Falling back to Edge TTS (free)...")
+                voice = "id-ID-ArdiNeural"
+                
+                async def _generate_fallback():
+                    communicate = edge_tts.Communicate(text, voice=voice)
+                    await communicate.save(tts_file)
+                
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor() as pool:
+                            pool.submit(asyncio.run, _generate_fallback()).result(timeout=30)
+                    else:
+                        loop.run_until_complete(_generate_fallback())
+                except RuntimeError:
+                    asyncio.run(_generate_fallback())
+                
+                self.log(f"  TTS: Edge TTS fallback OK")
+                return tts_file
+            except Exception as e:
+                self.log(f"  TTS: Edge TTS fallback also failed: {e}")
+        
+        raise Exception("All TTS methods failed. Please configure a TTS provider in Settings → AI API → Hook Maker.")
+
     def add_hook(self, input_path: str, hook_text: str, output_path: str) -> float:
         """Add hook scene at the beginning with multi-line yellow text (Fajar Sadboy style)"""
         
         # Report TTS character usage
         self.report_tokens(0, 0, 0, len(hook_text))
         
-        # Generate TTS audio
-        tts_response = self.tts_client.audio.speech.create(
-            model=self.tts_model,
-            voice="nova",
-            input=hook_text,
-            speed=1.0
-        )
-        
-        tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
-        with open(tts_file, 'wb') as f:
-            f.write(tts_response.content)
+        # Generate TTS audio using multi-provider strategy
+        tts_file = self.generate_tts_audio(hook_text)
         
         # Get TTS duration using ffprobe
         probe_cmd = [
@@ -3920,18 +4038,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Report TTS character usage
         self.report_tokens(0, 0, 0, len(hook_text))
         
-        # Generate TTS audio (10% progress)
+        # Generate TTS audio using multi-provider strategy (10% progress)
         progress_callback(0.1)
-        tts_response = self.tts_client.audio.speech.create(
-            model=self.tts_model,
-            voice="nova",
-            input=hook_text,
-            speed=1.0
-        )
-        
-        tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
-        with open(tts_file, 'wb') as f:
-            f.write(tts_response.content)
+        tts_file = self.generate_tts_audio(hook_text)
         
         progress_callback(0.2)
         
