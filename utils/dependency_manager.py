@@ -74,9 +74,9 @@ def get_ffmpeg_download_url():
     
     if os_type == 'windows':
         if arch == 'x86_64':
-            # Use GyanD full build from GitHub - includes all codecs + hardware encoders (AMF, NVENC, QSV)
-            url = "https://github.com/GyanD/codexffmpeg/releases/download/2026-01-29-git-c898ddb8fe/ffmpeg-2026-01-29-git-c898ddb8fe-full_build.zip"
-            filename = "ffmpeg-full_build.zip"
+            # Use BtbN latest build - always available, includes all codecs
+            url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+            filename = "ffmpeg-master-latest-win64-gpl.zip"
         else:
             # Fallback to BtbN for ARM
             url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-winarm64-gpl.zip"
@@ -189,12 +189,12 @@ def download_file(url: str, dest_path: Path, progress_callback=None):
         )
         
         try:
-            response = urllib.request.urlopen(request, context=ssl_context, timeout=120)
+            response = urllib.request.urlopen(request, context=ssl_context, timeout=600)
         except ssl.SSLCertVerificationError:
             # Fallback to unverified context if SSL verification fails
             debug_log("SSL verification failed, using unverified context")
             ssl_context = ssl._create_unverified_context()
-            response = urllib.request.urlopen(request, context=ssl_context, timeout=120)
+            response = urllib.request.urlopen(request, context=ssl_context, timeout=600)
         
         total_size = int(response.headers.get('Content-Length', 0))
         debug_log(f"Total size: {total_size} bytes")
